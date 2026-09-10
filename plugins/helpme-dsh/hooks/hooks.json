@@ -1,0 +1,18 @@
+{
+  "description": "Make DeepSeek Harness delegation discoverable without loading a skill or custom Codex subagent.",
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "startup|resume|clear|compact",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "printf '%s\\n' \"DeepSeek/DSH delegation is available through the helpme_dsh MCP. Use it when the user asks for DeepSeek or DSH, requests an independent implementation or review, or a bounded coding/analysis task benefits from delegation. Treat 'DeepSeek subagent' as this MCP, not a Codex custom subagent.\"",
+            "timeout": 3,
+            "additionalContextLimit": 256
+          }
+        ]
+      }
+    ]
+  }
+}

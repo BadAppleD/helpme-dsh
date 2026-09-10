@@ -481,10 +481,10 @@ const commonRunInputSchema = {
 };
 
 const server = new McpServer(
-  { name: "dsh-subagent", version: "0.1.0" },
+  { name: "helpme-dsh", version: "0.2.0" },
   {
     instructions:
-      "Use dsh_run to delegate a task to DeepSeek Harness. Always select cwd, work_mode, permission, model, and reasoning_effort explicitly. Use a fresh session unless the user asks to continue an existing DSH session. Never weaken permission beyond the user's request.",
+      "Delegate bounded coding, analysis, debugging, and review tasks to DeepSeek Harness. Normally call dsh_run directly with cwd set to the active workspace; omitted controls default to standard mode, workspace-write, deepseek-official/deepseek-flash, and high reasoning. Call dsh_capabilities only to inspect live alternatives. Omit session_id for a new session and reuse it only when continuing. Use dsh_run_danger only for an explicit unrestricted-access request. Never expose DSH credentials, tokens, or cookies.",
   },
 );
 
@@ -492,7 +492,8 @@ server.registerTool(
   "dsh_capabilities",
   {
     title: "List DeepSeek Harness capabilities",
-    description: "List the live DSH model catalog and work-mode presets before choosing run parameters.",
+    description:
+      "Inspect the live DSH model catalog, work-mode presets, and permission choices. Use this only when the user asks what is available or requests a non-default selection that must be resolved; it is not required before a normal dsh_run call.",
     inputSchema: {},
     annotations: {
       readOnlyHint: true,
@@ -524,7 +525,7 @@ server.registerTool(
   {
     title: "Run a DeepSeek Harness subagent",
     description:
-      "Run or continue one DSH session with an explicit workspace, DSH agent preset, permission preset, model, and reasoning effort. Returns the final answer and the effective session configuration.",
+      "Delegate one bounded coding, analysis, debugging, or review task to DeepSeek Harness, or continue an explicitly named DSH session. Set cwd to the active workspace. Omitted controls use the safe team defaults: standard mode, workspace-write, deepseek-official/deepseek-flash, and high reasoning. Returns the final answer and effective configuration.",
     inputSchema: {
       ...commonRunInputSchema,
       permission: z.enum(SAFE_PERMISSION_PRESETS).default("workspace-write").describe("DSH sandbox and approval preset."),
@@ -544,7 +545,7 @@ server.registerTool(
   {
     title: "Run a DeepSeek Harness subagent with unrestricted access",
     description:
-      "Run or continue one DSH session with danger-full-access. This tool always requires an explicit Codex user approval.",
+      "Delegate a task with danger-full-access. Use only when the user explicitly requests unrestricted access and approves the elevated risk; never select this tool merely because the normal workspace-write run failed.",
     inputSchema: commonRunInputSchema,
     annotations: {
       readOnlyHint: false,

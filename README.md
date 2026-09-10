@@ -9,7 +9,11 @@ Private team plugin that connects Codex App and Codex CLI to a local DeepSeek Ha
 - per-call work mode, model, reasoning effort, workspace, timeout, and session controls
 - complete DSH responses retrieved by request ID
 - cancellation forwarding and cross-process session locking
-- a `helpme-dsh` skill and optional `dsh_subagent` custom agent
+- a concise `SessionStart` routing hint for startup, resume, clear, and context compaction
+- self-describing MCP initialization instructions, tool descriptions, schemas, defaults, and safety annotations
+
+The plugin does not install a Codex custom subagent or Skill. Requests for a
+"DeepSeek subagent" are routed directly to the `helpme_dsh` MCP server.
 
 Default DSH controls are:
 
@@ -45,6 +49,7 @@ Then configure DSH once if the user has not already done so:
 ```
 
 Quit and reopen Codex App, or start a new Codex CLI session.
+Review and trust the plugin's `SessionStart` hook when Codex prompts you.
 
 ## Install the Marketplace directly
 
@@ -55,7 +60,19 @@ codex plugin marketplace add BadAppleD/helpme-dsh --ref main
 codex plugin add helpme-dsh@helpme-dsh-team
 ```
 
-This installs the MCP and skill. To also install the optional custom subagent, clone the repository and run `plugins/helpme-dsh/scripts/install.sh`.
+This installs the MCP and its bundled `SessionStart` hook. The clone-based installer also creates the default workspace allowlist and removes an unmodified legacy `dsh-subagent.toml` from version `0.1.0`.
+
+## Uninstall
+
+From a clone:
+
+```bash
+./plugins/helpme-dsh/scripts/uninstall.sh
+```
+
+This removes the installed plugin cache and the unmodified legacy custom agent.
+It preserves the marketplace registration, workspace allowlist, DSH credentials,
+and DSH sessions so the plugin can be reinstalled without logging in again.
 
 ## Workspace allowlist
 
@@ -77,13 +94,13 @@ The `DSH_ALLOWED_ROOTS` environment variable overrides this file. Use the platfo
 ## Use
 
 ```text
-Call dsh_subagent for this task using the defaults.
+Use the DeepSeek subagent to inspect this workspace.
 ```
 
 Or select controls explicitly:
 
 ```text
-Call dsh_subagent with cwd=/path/to/project, work_mode=ptc,
+Use DeepSeek through helpme-dsh with cwd=/path/to/project, work_mode=ptc,
 permission=read-only, model=deepseek-flash, reasoning_effort=max.
 Task: inspect the build pipeline without changing files.
 ```
@@ -104,7 +121,7 @@ After changing an installed local build, reinstall the plugin and start a new Co
 
 ## Compatibility
 
-The plugin and MCP work in Codex App and Codex CLI. Codex IDE extensions do not currently load plugins. The custom agent is installed separately under `~/.codex/agents/` because custom-agent sharing is not yet part of the portable plugin manifest.
+The plugin and MCP work in Codex App and Codex CLI. Codex IDE extensions do not currently load plugins.
 
 ## Security
 

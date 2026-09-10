@@ -1,22 +1,30 @@
 {
   "name": "helpme-dsh",
-  "version": "0.1.0",
-  "description": "Run local DeepSeek Harness sessions from Codex with per-call controls.",
+  "version": "0.2.0+codex.20260910121443",
+  "description": "Delegate local Codex tasks to DeepSeek Harness through a self-describing MCP server.",
   "author": {
     "name": "Steven Deng",
     "url": "https://github.com/BadAppleD"
   },
   "homepage": "https://github.com/BadAppleD/helpme-dsh",
   "repository": "https://github.com/BadAppleD/helpme-dsh",
-  "keywords": ["deepseek", "dsh", "mcp", "subagent"],
-  "skills": "./skills/",
+  "keywords": [
+    "deepseek",
+    "dsh",
+    "mcp",
+    "subagent"
+  ],
   "interface": {
     "displayName": "HelpMe DSH",
     "shortDescription": "Delegate local work to DeepSeek Harness.",
-    "longDescription": "Connect Codex App and Codex CLI to a local DeepSeek Harness process. Select the workspace, work mode, permission preset, model, reasoning effort, and session on every run.",
+    "longDescription": "Connect Codex App and Codex CLI to a local DeepSeek Harness process. A concise session hint routes suitable work to the MCP server, whose initialization instructions and tool schemas define detailed controls.",
     "developerName": "Steven Deng",
     "category": "Developer Tools",
-    "capabilities": ["Read", "Write", "MCP"],
+    "capabilities": [
+      "Read",
+      "Write",
+      "MCP"
+    ],
     "defaultPrompt": [
       "Ask DSH to inspect this workspace with the default settings.",
       "Delegate this task to DSH in read-only mode.",

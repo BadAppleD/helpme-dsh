@@ -3,10 +3,8 @@ set -eu
 
 PLUGIN_ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 REPO_ROOT=$(CDPATH= cd -- "$PLUGIN_ROOT/../.." && pwd)
-AGENT_SOURCE="$PLUGIN_ROOT/agents/dsh-subagent.toml"
 CODEX_DIR=${CODEX_HOME:-"$HOME/.codex"}
-AGENT_DIR="$CODEX_DIR/agents"
-AGENT_TARGET="$AGENT_DIR/dsh-subagent.toml"
+LEGACY_AGENT="$CODEX_DIR/agents/dsh-subagent.toml"
 DSH_CONFIG_DIR="$HOME/.config/helpme-dsh"
 ALLOWED_ROOTS_FILE="$DSH_CONFIG_DIR/allowed-roots"
 
@@ -15,23 +13,35 @@ if ! command -v codex >/dev/null 2>&1; then
   exit 1
 fi
 
-if [ -e "$AGENT_TARGET" ] && ! cmp -s "$AGENT_SOURCE" "$AGENT_TARGET"; then
-  echo "helpme-dsh: refusing to overwrite $AGENT_TARGET" >&2
-  echo "Move the existing file aside, then run this installer again." >&2
-  exit 1
-fi
-
 if ! codex plugin marketplace list --json | grep -Fq '"name": "helpme-dsh-team"'; then
   codex plugin marketplace add "$REPO_ROOT"
 fi
-codex plugin add helpme-dsh@helpme-dsh-team
 
-mkdir -p "$AGENT_DIR"
-cp "$AGENT_SOURCE" "$AGENT_TARGET"
+if codex plugin list --json | grep -Fq '"pluginId": "helpme-dsh@helpme-dsh-team"'; then
+  codex plugin remove helpme-dsh@helpme-dsh-team
+fi
+
+if [ -f "$LEGACY_AGENT" ]; then
+  if command -v shasum >/dev/null 2>&1; then
+    LEGACY_AGENT_ACTUAL_SHA256=$(shasum -a 256 "$LEGACY_AGENT" | awk '{print $1}')
+  else
+    LEGACY_AGENT_ACTUAL_SHA256=$(sha256sum "$LEGACY_AGENT" | awk '{print $1}')
+  fi
+  case "$LEGACY_AGENT_ACTUAL_SHA256" in
+    bdbfe7c4e90297477d2938aae05c9af7ad79bc13cf4af6d7a76221fd4f59c2b0|2a171d23033fd3bec713d8f35a23294dc4cfe3eef68e4c274fb032a888f8046a)
+      rm "$LEGACY_AGENT"
+      ;;
+    *)
+      echo "helpme-dsh: preserved user-modified legacy agent: $LEGACY_AGENT" >&2
+      ;;
+  esac
+fi
+
+codex plugin add helpme-dsh@helpme-dsh-team
 
 mkdir -p "$DSH_CONFIG_DIR"
 if [ ! -e "$ALLOWED_ROOTS_FILE" ]; then
   printf '%s\n' "$HOME" > "$ALLOWED_ROOTS_FILE"
 fi
 
-echo "helpme-dsh installed. Restart Codex App or start a new Codex CLI session."
+echo "helpme-dsh installed. Start a new Codex task and trust its SessionStart hook when prompted."
