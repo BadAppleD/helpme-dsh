@@ -70,7 +70,8 @@ From a clone:
 ./plugins/helpme-dsh/scripts/uninstall.sh
 ```
 
-This removes the installed plugin cache and the unmodified legacy custom agent.
+This removes the installed plugin cache, known legacy custom-agent files, and
+the exact legacy `agents.dsh_subagent` configuration block.
 It preserves the marketplace registration, workspace allowlist, DSH credentials,
 and DSH sessions so the plugin can be reinstalled without logging in again.
 

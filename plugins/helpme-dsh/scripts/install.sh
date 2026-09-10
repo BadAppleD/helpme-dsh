@@ -37,6 +37,7 @@ if [ -f "$LEGACY_AGENT" ]; then
   esac
 fi
 
+node "$PLUGIN_ROOT/scripts/cleanup-legacy-config.mjs"
 codex plugin add helpme-dsh@helpme-dsh-team
 
 mkdir -p "$DSH_CONFIG_DIR"

@@ -1,6 +1,7 @@
 #!/bin/sh
 set -eu
 
+PLUGIN_ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 CODEX_DIR=${CODEX_HOME:-"$HOME/.codex"}
 LEGACY_AGENT="$CODEX_DIR/agents/dsh-subagent.toml"
 
@@ -28,5 +29,7 @@ if [ -f "$LEGACY_AGENT" ]; then
       ;;
   esac
 fi
+
+node "$PLUGIN_ROOT/scripts/cleanup-legacy-config.mjs"
 
 echo "helpme-dsh uninstalled. DSH credentials, sessions, workspace allowlist, and marketplace registration were preserved."
