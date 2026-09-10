@@ -1,0 +1,62 @@
+#!/bin/sh
+set -eu
+
+PLUGIN_ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+SERVER_DIR="$PLUGIN_ROOT/server"
+
+if ! command -v node >/dev/null 2>&1; then
+  echo "helpme-dsh: Node.js 20 or newer is required" >&2
+  exit 1
+fi
+if ! command -v npm >/dev/null 2>&1; then
+  echo "helpme-dsh: npm is required for first-run setup" >&2
+  exit 1
+fi
+
+NODE_MAJOR=$(node -p 'Number(process.versions.node.split(".")[0])')
+if [ "$NODE_MAJOR" -lt 20 ]; then
+  echo "helpme-dsh: Node.js 20 or newer is required" >&2
+  exit 1
+fi
+
+if command -v shasum >/dev/null 2>&1; then
+  LOCK_HASH=$(shasum -a 256 "$SERVER_DIR/package-lock.json" | awk '{print $1}')
+else
+  LOCK_HASH=$(sha256sum "$SERVER_DIR/package-lock.json" | awk '{print $1}')
+fi
+READY_FILE="$SERVER_DIR/node_modules/.helpme-dsh-$LOCK_HASH"
+
+if [ ! -f "$READY_FILE" ]; then
+  INSTALL_LOCK="$SERVER_DIR/.install-lock"
+  if mkdir "$INSTALL_LOCK" 2>/dev/null; then
+    cleanup_install_lock() {
+      rmdir "$INSTALL_LOCK" 2>/dev/null || true
+    }
+    trap cleanup_install_lock EXIT INT TERM
+
+    if [ ! -f "$READY_FILE" ]; then
+      echo "helpme-dsh: installing pinned runtime dependencies..." >&2
+      (cd "$SERVER_DIR" && npm ci --omit=dev --no-audit --no-fund >&2)
+      : > "$READY_FILE"
+    fi
+
+    cleanup_install_lock
+    trap - EXIT INT TERM
+  else
+    count=0
+    while [ ! -f "$READY_FILE" ] && [ "$count" -lt 180 ]; do
+      sleep 1
+      count=$((count + 1))
+    done
+    if [ ! -f "$READY_FILE" ]; then
+      echo "helpme-dsh: timed out waiting for dependency installation" >&2
+      exit 1
+    fi
+  fi
+fi
+
+if [ "${HELPME_DSH_BOOTSTRAP_ONLY:-0}" = "1" ]; then
+  exit 0
+fi
+
+exec node "$SERVER_DIR/server.mjs"

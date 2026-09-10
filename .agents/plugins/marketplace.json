@@ -1,0 +1,20 @@
+{
+  "name": "helpme-dsh-team",
+  "interface": {
+    "displayName": "Helpme Dsh Team"
+  },
+  "plugins": [
+    {
+      "name": "helpme-dsh",
+      "source": {
+        "source": "local",
+        "path": "./plugins/helpme-dsh"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Productivity"
+    }
+  ]
+}

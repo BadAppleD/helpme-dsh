@@ -1,0 +1,12 @@
+.DS_Store
+.serena/
+node_modules/
+.install-lock/
+.helpme-dsh-*
+npm-debug.log*
+*.log
+.env
+.env.*
+!.env.example
+.dsh/
+credentials.yaml
