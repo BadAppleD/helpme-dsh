@@ -4,6 +4,8 @@ set -eu
 PLUGIN_ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 CODEX_DIR=${CODEX_HOME:-"$HOME/.codex"}
 LEGACY_AGENT="$CODEX_DIR/agents/dsh-subagent.toml"
+PLUGIN_COMMAND_DIR=${HELPME_DSH_BIN_DIR:-"$HOME/.local/bin"}
+PLUGIN_COMMAND="$PLUGIN_COMMAND_DIR/helpme-dsh"
 
 if ! command -v codex >/dev/null 2>&1; then
   echo "helpme-dsh: Codex CLI must be installed and available on PATH" >&2
@@ -31,5 +33,9 @@ if [ -f "$LEGACY_AGENT" ]; then
 fi
 
 node "$PLUGIN_ROOT/scripts/cleanup-legacy-config.mjs"
+
+if [ -L "$PLUGIN_COMMAND" ] && [ "$(readlink "$PLUGIN_COMMAND")" = "$PLUGIN_ROOT/scripts/update.sh" ]; then
+  rm "$PLUGIN_COMMAND"
+fi
 
 echo "helpme-dsh uninstalled. DSH credentials, sessions, workspace allowlist, and marketplace registration were preserved."

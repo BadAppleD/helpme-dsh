@@ -1,6 +1,6 @@
 {
   "name": "helpme-dsh",
-  "version": "0.3.0+codex.20260910164851",
+  "version": "0.3.0+codex.20260910170954",
   "description": "Delegate local Codex tasks to DeepSeek Harness through a self-describing MCP server.",
   "author": {
     "name": "Steven Deng",

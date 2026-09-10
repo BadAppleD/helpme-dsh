@@ -7,9 +7,19 @@ CODEX_DIR=${CODEX_HOME:-"$HOME/.codex"}
 LEGACY_AGENT="$CODEX_DIR/agents/dsh-subagent.toml"
 DSH_CONFIG_DIR="$HOME/.config/helpme-dsh"
 ALLOWED_ROOTS_FILE="$DSH_CONFIG_DIR/allowed-roots"
+PLUGIN_COMMAND_DIR=${HELPME_DSH_BIN_DIR:-"$HOME/.local/bin"}
+PLUGIN_COMMAND="$PLUGIN_COMMAND_DIR/helpme-dsh"
 
-if ! command -v codex >/dev/null 2>&1; then
-  echo "helpme-dsh: Codex CLI must be installed and available on PATH" >&2
+for command_name in codex git node npm; do
+  if ! command -v "$command_name" >/dev/null 2>&1; then
+    echo "helpme-dsh: required command is unavailable: $command_name" >&2
+    exit 1
+  fi
+done
+
+if [ -e "$PLUGIN_COMMAND" ] && [ ! -L "$PLUGIN_COMMAND" ]; then
+  echo "helpme-dsh: preserved existing non-symlink command: $PLUGIN_COMMAND" >&2
+  echo "helpme-dsh: move it or set HELPME_DSH_BIN_DIR before installing" >&2
   exit 1
 fi
 
@@ -38,11 +48,16 @@ if [ -f "$LEGACY_AGENT" ]; then
 fi
 
 node "$PLUGIN_ROOT/scripts/cleanup-legacy-config.mjs"
+npm --prefix "$PLUGIN_ROOT/server" ci
 codex plugin add helpme-dsh@helpme-dsh-team
+
+mkdir -p "$PLUGIN_COMMAND_DIR"
+ln -sfn "$PLUGIN_ROOT/scripts/update.sh" "$PLUGIN_COMMAND"
 
 mkdir -p "$DSH_CONFIG_DIR"
 if [ ! -e "$ALLOWED_ROOTS_FILE" ]; then
   printf '%s\n' "$HOME" > "$ALLOWED_ROOTS_FILE"
 fi
 
-echo "helpme-dsh installed. Start a new Codex task and trust its SessionStart hook when prompted."
+echo "helpme-dsh installed. Update later by running: helpme-dsh"
+echo "Start a new Codex task and trust its SessionStart hook when prompted."

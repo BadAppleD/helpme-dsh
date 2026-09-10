@@ -1,6 +1,6 @@
 # helpme-dsh
 
-Private team plugin that connects Codex App and Codex CLI to a local DeepSeek Harness process through MCP.
+Open-source plugin that connects Codex App and Codex CLI to a local DeepSeek Harness process through MCP.
 
 ## What it provides
 
@@ -31,14 +31,14 @@ reasoning_effort=high
 - macOS or Linux
 - Node.js 20 or newer with npm
 - Codex CLI available as `codex`
-- access to this private GitHub repository
+- network access to GitHub and npm during installation and updates
 
 DSH and all runtime dependencies are pinned in `plugins/helpme-dsh/server/package-lock.json`. The first setup downloads them from npm. Every user authenticates DSH locally; credentials and sessions are never stored in this repository.
 
 ## Install from a clone
 
 ```bash
-gh repo clone BadAppleD/helpme-dsh
+git clone https://github.com/BadAppleD/helpme-dsh.git
 cd helpme-dsh
 ./plugins/helpme-dsh/scripts/install.sh
 ```
@@ -51,21 +51,23 @@ Then configure DSH once if the user has not already done so:
 
 Quit and reopen Codex App, or start a new Codex CLI session.
 Review and trust the plugin's `SessionStart` hook when Codex prompts you.
+The clone-based installer also creates `~/.local/bin/helpme-dsh`; no global npm
+installation is required for this command.
 
 ## Update in place
 
-From the existing clone:
+After a clone-based installation, run this from any directory:
 
 ```bash
-git status --short
-./plugins/helpme-dsh/scripts/update.sh
+helpme-dsh
 ```
 
-The updater requires a clean checkout, performs a fast-forward-only pull,
-refreshes pinned runtime dependencies, and asks Codex to update the existing
-plugin registration in place. It does not call `codex plugin remove` and does
-not modify DSH credentials, Web profiles, workspace files, or persisted
-sessions.
+`helpme-dsh update` is an equivalent explicit form. The updater requires a
+clean checkout, performs a fast-forward-only pull, re-executes itself if the
+updater changed, refreshes pinned runtime dependencies, and asks Codex to
+update the existing plugin registration in place. It does not call
+`codex plugin remove` and does not modify DSH credentials, Web profiles,
+workspace files, or persisted sessions.
 
 For a checkout that was already synchronized by another trusted mechanism:
 
@@ -73,9 +75,12 @@ For a checkout that was already synchronized by another trusted mechanism:
 ./plugins/helpme-dsh/scripts/update.sh --skip-pull
 ```
 
+The public HTTPS remote supports anonymous updates, so a server does not need
+a GitHub account, personal access token, or deploy key.
+
 ## Install the Marketplace directly
 
-The plugin itself can be installed from the private GitHub Marketplace source:
+The plugin itself can be installed from the GitHub Marketplace source:
 
 ```bash
 codex plugin marketplace add BadAppleD/helpme-dsh --ref main
@@ -92,8 +97,9 @@ From a clone:
 ./plugins/helpme-dsh/scripts/uninstall.sh
 ```
 
-This removes the installed plugin cache, known legacy custom-agent files, and
-the exact legacy `agents.dsh_subagent` configuration block.
+This removes the installed plugin cache, the `helpme-dsh` CLI symlink, known
+legacy custom-agent files, and the exact legacy `agents.dsh_subagent`
+configuration block.
 It preserves the marketplace registration, workspace allowlist, DSH credentials,
 and DSH sessions so the plugin can be reinstalled without logging in again.
 
@@ -172,6 +178,13 @@ After changing an installed local build, run
 ## Compatibility
 
 The plugin and MCP work in Codex App and Codex CLI. Codex IDE extensions do not currently load plugins.
+
+## Contributing and license
+
+Contributions are welcome; see [CONTRIBUTING.md](CONTRIBUTING.md). Security
+issues should follow [SECURITY.md](SECURITY.md).
+
+Released under the [MIT License](LICENSE).
 
 ## Security
 

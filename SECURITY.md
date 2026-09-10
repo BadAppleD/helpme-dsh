@@ -24,4 +24,7 @@ Never commit:
 
 ## Reporting
 
-Report security issues privately to the repository owner rather than opening a public issue.
+Report vulnerabilities through
+[GitHub Security Advisories](https://github.com/BadAppleD/helpme-dsh/security/advisories/new)
+rather than opening a public issue. Include affected versions, impact, and a
+minimal reproduction when possible.
