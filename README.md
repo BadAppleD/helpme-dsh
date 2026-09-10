@@ -7,6 +7,7 @@ Open-source plugin that connects Codex App and Codex CLI to a local DeepSeek Har
 - `dsh_run` for `read-only` and `workspace-write` sessions
 - `dsh_run_danger` for explicitly approved `danger-full-access` sessions
 - `dsh_sessions`, `dsh_session_get`, and `dsh_session_close` for persistent session management
+- a three-process MCP pool for up to three independent concurrent DSH runs
 - per-call work mode, model, reasoning effort, workspace, timeout, and session controls
 - complete DSH responses retrieved by request ID
 - cancellation forwarding and cross-process session locking
@@ -14,7 +15,8 @@ Open-source plugin that connects Codex App and Codex CLI to a local DeepSeek Har
 - self-describing MCP initialization instructions, tool descriptions, schemas, defaults, and safety annotations
 
 The plugin does not install a Codex custom subagent or Skill. Requests for a
-"DeepSeek subagent" are routed directly to the `helpme_dsh` MCP server.
+"DeepSeek subagent" are routed across `helpme_dsh`, `helpme_dsh_2`, and
+`helpme_dsh_3`.
 
 Default DSH controls are:
 
@@ -157,8 +159,17 @@ archives a completed session from visible DSH lists while retaining its history;
 it never deletes workspace files and rejects a session that is still running.
 
 Multiple DSH sessions may coexist. One MCP connection serializes active runs,
-while cross-process locks prevent two Codex tasks from changing the same DSH
-session concurrently.
+while the three independent MCP processes allow up to three active runs.
+Cross-process locks prevent concurrent use of the same DSH session, concurrent
+`workspace-write` runs in the same workspace, and concurrent
+`danger-full-access` runs. Read-only runs may share a workspace.
+
+For example, ask Codex to use all three pool slots for independent work:
+
+```text
+Run these three read-only DSH tasks in parallel using helpme_dsh,
+helpme_dsh_2, and helpme_dsh_3, one task per MCP instance.
+```
 
 `danger-full-access` is a separate MCP tool and must keep interactive approval enabled. Do not weaken this policy in team configuration.
 

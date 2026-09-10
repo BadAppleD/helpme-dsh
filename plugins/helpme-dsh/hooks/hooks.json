@@ -7,7 +7,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "printf '%s\\n' \"DeepSeek/DSH delegation is available through the helpme_dsh MCP. Use it when the user asks for DeepSeek or DSH, requests an independent implementation or review, or a bounded coding/analysis task benefits from delegation. Treat 'DeepSeek subagent' as this MCP, not a Codex custom subagent.\"",
+            "command": "printf '%s\\n' \"DeepSeek/DSH delegation is available through a three-process MCP pool: helpme_dsh, helpme_dsh_2, and helpme_dsh_3. Use distinct instances for independent parallel tasks. Never run the same session concurrently, and do not parallelize write-capable tasks in the same workspace. Defaults and controls are self-described by each MCP. Treat 'DeepSeek subagent' as this pool, not a Codex custom subagent.\"",
             "timeout": 3,
             "additionalContextLimit": 256
           }

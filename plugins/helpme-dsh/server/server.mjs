@@ -85,9 +85,9 @@ async function waitForExit(child, timeoutMs) {
   ]);
 }
 
-async function withSessionLock(sessionId, operation) {
+async function withNamedLock(lockKey, busyMessage, operation) {
   await mkdir(SESSION_LOCK_DIR, { recursive: true, mode: 0o700 });
-  const lockName = createHash("sha256").update(sessionId).digest("hex");
+  const lockName = createHash("sha256").update(lockKey).digest("hex");
   const markerPath = join(SESSION_LOCK_DIR, lockName);
   const marker = await open(markerPath, "a", 0o600);
   await marker.close();
@@ -100,7 +100,7 @@ async function withSessionLock(sessionId, operation) {
       update: 30_000,
     });
   } catch (error) {
-    if (error.code === "ELOCKED") throw new Error(`DSH session is busy: ${sessionId}`);
+    if (error.code === "ELOCKED") throw new Error(busyMessage);
     throw error;
   }
   try {
@@ -108,6 +108,14 @@ async function withSessionLock(sessionId, operation) {
   } finally {
     await release();
   }
+}
+
+async function withSessionLock(sessionId, operation) {
+  return withNamedLock(
+    sessionId,
+    `DSH session is busy: ${sessionId}`,
+    operation,
+  );
 }
 
 async function withHostRunLock(operation) {
@@ -615,7 +623,23 @@ async function invokeDshRunUnlocked({
 }
 
 async function invokeDshRun(args, signal, permission) {
-  return withHostRunLock(() => invokeDshRunUnlocked(args, signal, permission));
+  return withHostRunLock(async () => {
+    if (permission === "read-only") {
+      return invokeDshRunUnlocked(args, signal, permission);
+    }
+
+    const workspace = await requireWorkspace(args.cwd);
+    const lockKey = permission === "danger-full-access"
+      ? "execution-scope:danger-full-access"
+      : `execution-scope:workspace-write:${workspace}`;
+    const busyMessage = permission === "danger-full-access"
+      ? "Another danger-full-access DSH run is already active"
+      : `Another workspace-write DSH run is already active for: ${workspace}`;
+    return withNamedLock(lockKey, busyMessage, () => invokeDshRunUnlocked({
+      ...args,
+      cwd: workspace,
+    }, signal, permission));
+  });
 }
 
 async function invokeSessionList({ cwd, include_blank: includeBlank, limit }, signal) {
@@ -686,7 +710,7 @@ const sessionReferenceInputSchema = {
 };
 
 const server = new McpServer(
-  { name: "helpme-dsh", version: "0.3.0" },
+  { name: "helpme-dsh", version: "0.4.0" },
   {
     instructions:
       "Delegate bounded coding, analysis, debugging, and review tasks to DeepSeek Harness. Normally call dsh_run directly with cwd set to the active workspace; omitted controls default to standard mode, workspace-write, deepseek-official/deepseek-flash, and high reasoning. Give a new long-lived subagent a session_name; reuse that name or the returned sessionId when the user says continue, and do not create a fresh session in that case. Use dsh_sessions only to resolve ambiguity, dsh_session_get for one summary, and dsh_session_close to archive a finished session without deleting its history. Call dsh_capabilities only for live alternatives. Use dsh_run_danger only for an explicit unrestricted-access request. Never expose DSH credentials, tokens, or cookies.",
@@ -721,6 +745,9 @@ server.registerTool(
         readableNames: true,
         multipleSessions: true,
         parallelRunsPerMcpConnection: false,
+        parallelMcpPoolSize: 3,
+        sameWritableWorkspaceParallel: false,
+        dangerFullAccessParallel: false,
         closeBehavior: "archive-with-history-retained",
       },
     };
