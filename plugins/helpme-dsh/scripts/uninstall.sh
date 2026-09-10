@@ -33,6 +33,7 @@ if [ -f "$LEGACY_AGENT" ]; then
 fi
 
 node "$PLUGIN_ROOT/scripts/cleanup-legacy-config.mjs"
+node "$PLUGIN_ROOT/scripts/global-agent-rule.mjs" --remove
 
 if [ -L "$PLUGIN_COMMAND" ] && [ "$(readlink "$PLUGIN_COMMAND")" = "$PLUGIN_ROOT/scripts/update.sh" ]; then
   rm "$PLUGIN_COMMAND"

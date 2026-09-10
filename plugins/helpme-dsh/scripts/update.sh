@@ -88,6 +88,7 @@ fi
 
 npm --prefix "$PLUGIN_ROOT/server" ci
 codex plugin add "$PLUGIN_ID"
+node "$PLUGIN_ROOT/scripts/global-agent-rule.mjs"
 mkdir -p "$PLUGIN_COMMAND_DIR"
 ln -sfn "$PLUGIN_ROOT/scripts/update.sh" "$PLUGIN_COMMAND"
 

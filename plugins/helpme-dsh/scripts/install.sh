@@ -50,6 +50,7 @@ fi
 node "$PLUGIN_ROOT/scripts/cleanup-legacy-config.mjs"
 npm --prefix "$PLUGIN_ROOT/server" ci
 codex plugin add helpme-dsh@helpme-dsh-team
+node "$PLUGIN_ROOT/scripts/global-agent-rule.mjs"
 
 mkdir -p "$PLUGIN_COMMAND_DIR"
 ln -sfn "$PLUGIN_ROOT/scripts/update.sh" "$PLUGIN_COMMAND"

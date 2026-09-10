@@ -54,7 +54,9 @@ Then configure DSH once if the user has not already done so:
 Quit and reopen Codex App, or start a new Codex CLI session.
 Review and trust the plugin's `SessionStart` hook when Codex prompts you.
 The clone-based installer also creates `~/.local/bin/helpme-dsh`; no global npm
-installation is required for this command.
+installation is required for this command. It adds an idempotent routing rule to
+`$CODEX_HOME/AGENTS.md` (default `~/.codex/AGENTS.md`) so requests for a
+`DSH subagent` use the HelpMe DSH MCP by default.
 
 ## Update in place
 
@@ -101,7 +103,8 @@ From a clone:
 
 This removes the installed plugin cache, the `helpme-dsh` CLI symlink, known
 legacy custom-agent files, and the exact legacy `agents.dsh_subagent`
-configuration block.
+configuration block. It also removes the unchanged global `AGENTS.md` block
+managed by HelpMe DSH, while preserving user-authored or modified rules.
 It preserves the marketplace registration, workspace allowlist, DSH credentials,
 and DSH sessions so the plugin can be reinstalled without logging in again.
 
@@ -180,6 +183,7 @@ cd plugins/helpme-dsh/server
 npm ci
 node --check server.mjs
 cd ../../..
+node --test plugins/helpme-dsh/scripts/global-agent-rule.test.mjs
 python3 "$HOME/.codex/skills/.system/plugin-creator/scripts/validate_plugin.py" plugins/helpme-dsh
 ```
 
