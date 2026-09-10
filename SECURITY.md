@@ -6,6 +6,10 @@
 
 `danger-full-access` is exposed through a separate MCP tool configured for interactive approval. Do not configure it for automatic approval.
 
+`dsh_session_close` is also configured for interactive approval. It archives a
+session from visible DSH lists but deliberately retains the session history and
+does not delete workspace files.
+
 ## Credentials
 
 DSH authentication remains in the user's local DSH configuration. The MCP bridge keeps its loopback launch token and session cookie in memory and never includes them in tool results.

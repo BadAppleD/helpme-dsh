@@ -6,6 +6,7 @@ Private team plugin that connects Codex App and Codex CLI to a local DeepSeek Ha
 
 - `dsh_run` for `read-only` and `workspace-write` sessions
 - `dsh_run_danger` for explicitly approved `danger-full-access` sessions
+- `dsh_sessions`, `dsh_session_get`, and `dsh_session_close` for persistent session management
 - per-call work mode, model, reasoning effort, workspace, timeout, and session controls
 - complete DSH responses retrieved by request ID
 - cancellation forwarding and cross-process session locking
@@ -50,6 +51,27 @@ Then configure DSH once if the user has not already done so:
 
 Quit and reopen Codex App, or start a new Codex CLI session.
 Review and trust the plugin's `SessionStart` hook when Codex prompts you.
+
+## Update in place
+
+From the existing clone:
+
+```bash
+git status --short
+./plugins/helpme-dsh/scripts/update.sh
+```
+
+The updater requires a clean checkout, performs a fast-forward-only pull,
+refreshes pinned runtime dependencies, and asks Codex to update the existing
+plugin registration in place. It does not call `codex plugin remove` and does
+not modify DSH credentials, Web profiles, workspace files, or persisted
+sessions.
+
+For a checkout that was already synchronized by another trusted mechanism:
+
+```bash
+./plugins/helpme-dsh/scripts/update.sh --skip-pull
+```
 
 ## Install the Marketplace directly
 
@@ -106,6 +128,32 @@ permission=read-only, model=deepseek-flash, reasoning_effort=max.
 Task: inspect the build pipeline without changing files.
 ```
 
+Create or continue a readable long-lived DSH subagent by passing the same
+`session_name` on every related call:
+
+```text
+Use DeepSeek through helpme-dsh with session_name=perception-review.
+Task: inspect the perception architecture and remember the findings.
+
+Continue the DSH session named perception-review.
+Task: implement the agreed fix and run the focused tests.
+```
+
+Every run returns both `sessionName` and the exact `sessionId`. `session_id`
+remains supported for exact continuation and must not be combined with
+`session_name`. Names are matched case-insensitively and are unique across
+visible sessions; use the exact ID if an older DSH profile already contains
+duplicate titles.
+
+`dsh_sessions` lists recent sessions inside the configured workspace allowlist,
+and `dsh_session_get` reads one summary without resuming it. `dsh_session_close`
+archives a completed session from visible DSH lists while retaining its history;
+it never deletes workspace files and rejects a session that is still running.
+
+Multiple DSH sessions may coexist. One MCP connection serializes active runs,
+while cross-process locks prevent two Codex tasks from changing the same DSH
+session concurrently.
+
 `danger-full-access` is a separate MCP tool and must keep interactive approval enabled. Do not weaken this policy in team configuration.
 
 ## Development
@@ -118,7 +166,8 @@ cd ../../..
 python3 "$HOME/.codex/skills/.system/plugin-creator/scripts/validate_plugin.py" plugins/helpme-dsh
 ```
 
-After changing an installed local build, reinstall the plugin and start a new Codex task.
+After changing an installed local build, run
+`./plugins/helpme-dsh/scripts/update.sh --skip-pull` and start a new Codex task.
 
 ## Compatibility
 

@@ -1,6 +1,6 @@
 {
   "name": "helpme-dsh",
-  "version": "0.2.0+codex.20260910122903",
+  "version": "0.3.0+codex.20260910164851",
   "description": "Delegate local Codex tasks to DeepSeek Harness through a self-describing MCP server.",
   "author": {
     "name": "Steven Deng",
@@ -17,7 +17,7 @@
   "interface": {
     "displayName": "HelpMe DSH",
     "shortDescription": "Delegate local work to DeepSeek Harness.",
-    "longDescription": "Connect Codex App and Codex CLI to a local DeepSeek Harness process. A concise session hint routes suitable work to the MCP server, whose initialization instructions and tool schemas define detailed controls.",
+    "longDescription": "Connect Codex App and Codex CLI to local DeepSeek Harness sessions. A concise session hint routes suitable work to the MCP server, whose self-describing tools support named long-lived subagents, continuation, inspection, and archival.",
     "developerName": "Steven Deng",
     "category": "Developer Tools",
     "capabilities": [
@@ -28,7 +28,8 @@
     "defaultPrompt": [
       "Ask DSH to inspect this workspace with the default settings.",
       "Delegate this task to DSH in read-only mode.",
-      "Continue an existing DSH session."
+      "Create a named DSH session and continue it later.",
+      "List my visible DSH sessions."
     ]
   },
   "mcpServers": "./.mcp.json"

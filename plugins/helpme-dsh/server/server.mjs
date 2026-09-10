@@ -55,6 +55,22 @@ if (configuredRoots.length === 0) {
 const SESSION_LOCK_DIR = join(tmpdir(), "codex-dsh-mcp-locks");
 let hostRunBusy = false;
 
+function normalizeSessionName(value) {
+  const name = value.trim();
+  if (name.length === 0) throw new Error("DSH session name must not be empty");
+  if (/[\u0000-\u001f\u007f]/u.test(name)) {
+    throw new Error("DSH session name must not contain control characters");
+  }
+  if (Buffer.byteLength(name, "utf8") > 80) {
+    throw new Error("DSH session name must be at most 80 UTF-8 bytes");
+  }
+  return name;
+}
+
+function sessionNameKey(value) {
+  return normalizeSessionName(value).toLocaleLowerCase("en-US");
+}
+
 function combinedSignal(signal, timeoutMs = RPC_TIMEOUT_MS) {
   const signals = [AbortSignal.timeout(timeoutMs)];
   if (signal !== undefined) signals.push(signal);
@@ -262,6 +278,117 @@ async function sessionSummary(sessionId, signal) {
   return value.items.find((item) => item.sessionId === sessionId);
 }
 
+async function listSessionSummaries(signal) {
+  const value = await bridge.rpc("session/list", { _request: {} }, signal);
+  const allowedRoots = await Promise.all(configuredRoots.map((root) => realpath(root)));
+  const admitted = await Promise.all(value.items.map(async (item) => {
+    if (typeof item.cwd !== "string") return undefined;
+    let absolute;
+    try {
+      absolute = await realpath(item.cwd);
+    } catch {
+      return undefined;
+    }
+    const allowed = allowedRoots.some((root) => {
+      const prefix = root.endsWith(sep) ? root : `${root}${sep}`;
+      return absolute === root || absolute.startsWith(prefix);
+    });
+    return allowed ? item : undefined;
+  }));
+  return admitted.filter((item) => item !== undefined);
+}
+
+function sessionTitle(summary) {
+  const title = summary.projections?.values?.title;
+  return typeof title === "string" && title.trim().length > 0 ? title : undefined;
+}
+
+function publicSessionSummary(summary) {
+  const model = summary.projections?.values?.modelSelection?.lastUsed ?? null;
+  const updatedAtMs = summary.updatedAt < 10_000_000_000
+    ? summary.updatedAt * 1_000
+    : summary.updatedAt;
+  return {
+    sessionId: summary.sessionId,
+    sessionName: sessionTitle(summary) ?? null,
+    cwd: summary.cwd ?? null,
+    updatedAt: summary.updatedAt,
+    updatedAtIso: new Date(updatedAtMs).toISOString(),
+    running: summary.running,
+    blank: summary.blank,
+    workMode: summary.projections?.values?.agentPreset ?? null,
+    model,
+    stats: summary.projections?.values?.sessionStats ?? null,
+  };
+}
+
+function validateSessionReference(sessionId, sessionName) {
+  if (sessionId !== undefined && sessionName !== undefined) {
+    throw new Error("Provide either session_id or session_name, not both");
+  }
+  if (sessionId === undefined && sessionName === undefined) {
+    throw new Error("Provide session_id or session_name");
+  }
+  return sessionName === undefined
+    ? { sessionId }
+    : { sessionName: normalizeSessionName(sessionName) };
+}
+
+async function resolveSessionReference({ sessionId, sessionName }, signal) {
+  const reference = validateSessionReference(sessionId, sessionName);
+  const summaries = await listSessionSummaries(signal);
+  if (reference.sessionId !== undefined) {
+    const summary = summaries.find((item) => item.sessionId === reference.sessionId);
+    if (summary === undefined) throw new Error(`DSH session does not exist: ${reference.sessionId}`);
+    return summary;
+  }
+
+  const key = sessionNameKey(reference.sessionName);
+  const matches = summaries.filter((item) => {
+    const title = sessionTitle(item);
+    return title !== undefined && sessionNameKey(title) === key;
+  });
+  if (matches.length === 0) throw new Error(`DSH session name does not exist: ${reference.sessionName}`);
+  if (matches.length > 1) {
+    throw new Error(
+      `DSH session name is ambiguous: ${reference.sessionName}; use session_id instead`,
+    );
+  }
+  return matches[0];
+}
+
+async function findSessionByName(sessionName, signal) {
+  const name = normalizeSessionName(sessionName);
+  const key = sessionNameKey(name);
+  const summaries = await listSessionSummaries(signal);
+  const matches = summaries.filter((item) => {
+    const title = sessionTitle(item);
+    return title !== undefined && sessionNameKey(title) === key;
+  });
+  if (matches.length > 1) {
+    throw new Error(`DSH session name is ambiguous: ${name}; use session_id instead`);
+  }
+  return { name, summary: matches[0] };
+}
+
+async function withResolvedSessionLock({ session_id: sessionId, session_name: sessionName }, signal, operation) {
+  const reference = validateSessionReference(sessionId, sessionName);
+  if (reference.sessionId !== undefined) {
+    return withSessionLock(reference.sessionId, async () => {
+      const summary = await resolveSessionReference(reference, signal);
+      return operation(summary);
+    });
+  }
+
+  return withSessionLock(`name:${sessionNameKey(reference.sessionName)}`, async () => {
+    const summary = await resolveSessionReference(reference, signal);
+    return withSessionLock(summary.sessionId, async () => {
+      const current = await resolveSessionReference({ sessionId: summary.sessionId }, signal);
+      return operation(current);
+    });
+  });
+}
+
 async function waitForTurn(sessionId, previousTurns, timeoutSeconds, signal) {
   const deadline = Date.now() + timeoutSeconds * 1_000;
   while (Date.now() < deadline) {
@@ -399,6 +526,7 @@ async function runCreatedSession({
     const projections = summary.projections?.values ?? {};
     return {
       sessionId,
+      sessionName: sessionTitle(summary) ?? null,
       response,
       effective: {
         cwd: summary.cwd,
@@ -428,14 +556,18 @@ async function invokeDshRunUnlocked({
   model,
   reasoning_effort: reasoningEffort,
   session_id: requestedSessionId,
+  session_name: requestedSessionName,
   timeout_seconds: timeoutSeconds,
 }, signal, permission) {
   const workspace = await requireWorkspace(cwd);
-  const create = async () => bridge.rpc("session/create", {
+  if (requestedSessionId !== undefined && requestedSessionName !== undefined) {
+    throw new Error("Provide either session_id or session_name, not both");
+  }
+  const create = async (sessionId) => bridge.rpc("session/create", {
     request: {
       cwd: workspace,
       agentPreset: workMode,
-      ...(requestedSessionId === undefined ? {} : { sessionId: requestedSessionId }),
+      ...(sessionId === undefined ? {} : { sessionId }),
     },
   }, signal);
   const execute = async (sessionId) => runCreatedSession({
@@ -452,8 +584,25 @@ async function invokeDshRunUnlocked({
   let value;
   if (requestedSessionId !== undefined) {
     value = await withSessionLock(requestedSessionId, async () => {
-      const creation = await create();
+      const creation = await create(requestedSessionId);
       return execute(creation.sessionId);
+    });
+  } else if (requestedSessionName !== undefined) {
+    const name = normalizeSessionName(requestedSessionName);
+    value = await withSessionLock(`name:${sessionNameKey(name)}`, async () => {
+      const existing = await findSessionByName(name, signal);
+      if (existing.summary !== undefined) {
+        return withSessionLock(existing.summary.sessionId, async () => {
+          const creation = await create(existing.summary.sessionId);
+          return execute(creation.sessionId);
+        });
+      }
+
+      const creation = await create();
+      await bridge.rpc("session/rename", {
+        request: { sessionId: creation.sessionId, title: name },
+      }, signal);
+      return withSessionLock(creation.sessionId, () => execute(creation.sessionId));
     });
   } else {
     const creation = await create();
@@ -469,6 +618,52 @@ async function invokeDshRun(args, signal, permission) {
   return withHostRunLock(() => invokeDshRunUnlocked(args, signal, permission));
 }
 
+async function invokeSessionList({ cwd, include_blank: includeBlank, limit }, signal) {
+  const workspace = cwd === undefined ? undefined : await requireWorkspace(cwd);
+  const summaries = await listSessionSummaries(signal);
+  const sessions = summaries
+    .filter((summary) => (includeBlank || !summary.blank) && (workspace === undefined || summary.cwd === workspace))
+    .slice(0, limit)
+    .map(publicSessionSummary);
+  const value = { sessions };
+  return {
+    content: [{ type: "text", text: JSON.stringify(value, null, 2) }],
+    structuredContent: value,
+  };
+}
+
+async function invokeSessionGet(args, signal) {
+  const summary = await resolveSessionReference({
+    sessionId: args.session_id,
+    sessionName: args.session_name,
+  }, signal);
+  const value = { session: publicSessionSummary(summary) };
+  return {
+    content: [{ type: "text", text: JSON.stringify(value, null, 2) }],
+    structuredContent: value,
+  };
+}
+
+async function invokeSessionClose(args, signal) {
+  return withHostRunLock(() => withResolvedSessionLock(args, signal, async (summary) => {
+    if (summary.running) throw new Error(`DSH session is still running: ${summary.sessionId}`);
+    await bridge.rpc("workspace/archiveSession", {
+      request: { sessionId: summary.sessionId },
+    }, signal);
+    const value = {
+      sessionId: summary.sessionId,
+      sessionName: sessionTitle(summary) ?? null,
+      closed: true,
+      archived: true,
+      historyRetained: true,
+    };
+    return {
+      content: [{ type: "text", text: JSON.stringify(value, null, 2) }],
+      structuredContent: value,
+    };
+  }));
+}
+
 const commonRunInputSchema = {
   task: z.string().min(1).describe("Complete task for DeepSeek Harness."),
   cwd: z.string().min(1).describe("Absolute workspace directory."),
@@ -477,14 +672,24 @@ const commonRunInputSchema = {
   model: z.string().min(1).default("deepseek-flash"),
   reasoning_effort: z.enum(REASONING_EFFORTS).default("high"),
   session_id: z.string().min(1).optional().describe("Existing DSH session to continue; omit for a fresh session."),
+  session_name: z.string().min(1).max(80).optional().describe(
+    "Readable persistent DSH session name. Reuses an existing matching session or creates and names a new one. Do not combine with session_id.",
+  ),
   timeout_seconds: z.number().int().min(10).max(3600).default(600),
 };
 
+const sessionReferenceInputSchema = {
+  session_id: z.string().min(1).optional().describe("Exact DSH session ID."),
+  session_name: z.string().min(1).max(80).optional().describe(
+    "Readable DSH session name. Names are matched case-insensitively. Do not combine with session_id.",
+  ),
+};
+
 const server = new McpServer(
-  { name: "helpme-dsh", version: "0.2.0" },
+  { name: "helpme-dsh", version: "0.3.0" },
   {
     instructions:
-      "Delegate bounded coding, analysis, debugging, and review tasks to DeepSeek Harness. Normally call dsh_run directly with cwd set to the active workspace; omitted controls default to standard mode, workspace-write, deepseek-official/deepseek-flash, and high reasoning. Call dsh_capabilities only to inspect live alternatives. Omit session_id for a new session and reuse it only when continuing. Use dsh_run_danger only for an explicit unrestricted-access request. Never expose DSH credentials, tokens, or cookies.",
+      "Delegate bounded coding, analysis, debugging, and review tasks to DeepSeek Harness. Normally call dsh_run directly with cwd set to the active workspace; omitted controls default to standard mode, workspace-write, deepseek-official/deepseek-flash, and high reasoning. Give a new long-lived subagent a session_name; reuse that name or the returned sessionId when the user says continue, and do not create a fresh session in that case. Use dsh_sessions only to resolve ambiguity, dsh_session_get for one summary, and dsh_session_close to archive a finished session without deleting its history. Call dsh_capabilities only for live alternatives. Use dsh_run_danger only for an explicit unrestricted-access request. Never expose DSH credentials, tokens, or cookies.",
   },
 );
 
@@ -512,6 +717,12 @@ server.registerTool(
       workModes: presets.presets,
       permissions: PERMISSION_PRESETS,
       models,
+      sessionManagement: {
+        readableNames: true,
+        multipleSessions: true,
+        parallelRunsPerMcpConnection: false,
+        closeBehavior: "archive-with-history-retained",
+      },
     };
     return {
       content: [{ type: "text", text: JSON.stringify(value, null, 2) }],
@@ -521,11 +732,66 @@ server.registerTool(
 );
 
 server.registerTool(
+  "dsh_sessions",
+  {
+    title: "List DeepSeek Harness sessions",
+    description:
+      "List recent visible DSH sessions under the configured workspace allowlist. Use this only when the user asks for sessions or when a requested continuation is ambiguous. Returns readable names, IDs, workspaces, running state, model, and summary statistics.",
+    inputSchema: {
+      cwd: z.string().min(1).optional().describe("Optional absolute workspace directory filter."),
+      include_blank: z.boolean().default(false).describe("Include sessions that have no completed prompt."),
+      limit: z.number().int().min(1).max(100).default(20),
+    },
+    annotations: {
+      readOnlyHint: true,
+      destructiveHint: false,
+      idempotentHint: true,
+      openWorldHint: false,
+    },
+  },
+  async (args, { signal }) => invokeSessionList(args, signal),
+);
+
+server.registerTool(
+  "dsh_session_get",
+  {
+    title: "Get one DeepSeek Harness session",
+    description:
+      "Get one visible DSH session summary by exact session_id or readable session_name. Provide exactly one reference. Use the returned identity when continuing the subagent with dsh_run.",
+    inputSchema: sessionReferenceInputSchema,
+    annotations: {
+      readOnlyHint: true,
+      destructiveHint: false,
+      idempotentHint: true,
+      openWorldHint: false,
+    },
+  },
+  async (args, { signal }) => invokeSessionGet(args, signal),
+);
+
+server.registerTool(
+  "dsh_session_close",
+  {
+    title: "Close one DeepSeek Harness session",
+    description:
+      "Close a completed DSH session by archiving it from visible session lists. This retains the persisted DSH history and does not delete workspace files. Provide exactly one of session_id or session_name. A running session is rejected rather than cancelled.",
+    inputSchema: sessionReferenceInputSchema,
+    annotations: {
+      readOnlyHint: false,
+      destructiveHint: false,
+      idempotentHint: false,
+      openWorldHint: false,
+    },
+  },
+  async (args, { signal }) => invokeSessionClose(args, signal),
+);
+
+server.registerTool(
   "dsh_run",
   {
     title: "Run a DeepSeek Harness subagent",
     description:
-      "Delegate one bounded coding, analysis, debugging, or review task to DeepSeek Harness, or continue an explicitly named DSH session. Set cwd to the active workspace. Omitted controls use the safe team defaults: standard mode, workspace-write, deepseek-official/deepseek-flash, and high reasoning. Returns the final answer and effective configuration.",
+      "Delegate one bounded coding, analysis, debugging, or review task to DeepSeek Harness. Set session_name to create or continue a readable long-lived subagent, or session_id to continue an exact session; omit both only for a fresh unnamed session. Set cwd to the active workspace. Omitted controls use standard mode, workspace-write, deepseek-official/deepseek-flash, and high reasoning. Returns the final answer, session name, session ID, and effective configuration.",
     inputSchema: {
       ...commonRunInputSchema,
       permission: z.enum(SAFE_PERMISSION_PRESETS).default("workspace-write").describe("DSH sandbox and approval preset."),
