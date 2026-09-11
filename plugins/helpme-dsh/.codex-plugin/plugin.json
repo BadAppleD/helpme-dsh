@@ -1,6 +1,6 @@
 {
   "name": "helpme-dsh",
-  "version": "0.4.0+codex.20260910174512",
+  "version": "0.5.0+codex.20260911035302",
   "description": "Delegate local Codex tasks to DeepSeek Harness through a self-describing MCP server.",
   "author": {
     "name": "Steven Deng",
@@ -17,7 +17,7 @@
   "interface": {
     "displayName": "HelpMe DSH",
     "shortDescription": "Delegate local work to DeepSeek Harness.",
-    "longDescription": "Connect Codex App and Codex CLI to a three-process pool of local DeepSeek Harness sessions. A concise session hint routes independent parallel work across self-describing MCP servers with named long-lived sessions, continuation, inspection, and archival.",
+    "longDescription": "Connect Codex App and Codex CLI to one plugin-managed DeepSeek Harness Host at 127.0.0.1:3080. Independent subagents run concurrently as sessions in the same browser UI, with named continuation, inspection, archival, and event-driven completion.",
     "developerName": "Steven Deng",
     "category": "Developer Tools",
     "capabilities": [

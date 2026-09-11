@@ -1,30 +1,21 @@
 #!/usr/bin/env node
 
-import { spawn } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
-import { mkdir, open, realpath, stat } from "node:fs/promises";
+import { mkdir, open, readFile, realpath, stat, unlink, writeFile } from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
 import { delimiter, join, sep } from "node:path";
-import { createInterface } from "node:readline";
 import { setTimeout as delay } from "node:timers/promises";
-import { fileURLToPath } from "node:url";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import lockfile from "proper-lockfile";
 import WebSocket from "ws";
 import { z } from "zod";
 import { EventDrivenTurn } from "./event-driven-turn.mjs";
+import { ensureManagedHost, managedHostPaths } from "./managed-host.mjs";
 
-const BUNDLED_DSH_ENTRY = fileURLToPath(
-  new URL("./node_modules/@deepseek-ai/dsh/lib/bin.js", import.meta.url),
-);
-const DSH_COMMAND = process.env.DSH_BINARY ?? process.execPath;
-const DSH_ARGV_PREFIX = process.env.DSH_BINARY === undefined ? [BUNDLED_DSH_ENTRY] : [];
 const DSH_VERSION = "0.1.5-rc.1";
-const START_TIMEOUT_MS = 20_000;
 const RPC_TIMEOUT_MS = 20_000;
-const STOP_GRACE_MS = 3_000;
 const CANCEL_CONFIRM_GRACE_MS = 3_000;
 const FOLLOW_RECONNECT_LIMIT = 3;
 const FOLLOW_RECONNECT_DELAY_MS = 200;
@@ -57,7 +48,7 @@ if (configuredRoots.length === 0) {
   throw new Error("DSH workspace allowlist is empty");
 }
 const SESSION_LOCK_DIR = join(tmpdir(), "codex-dsh-mcp-locks");
-let hostRunBusy = false;
+const QUARANTINE_DIR = join(managedHostPaths().runtimeDir, "quarantine");
 
 function normalizeSessionName(value) {
   const name = value.trim();
@@ -79,14 +70,6 @@ function combinedSignal(signal, timeoutMs = RPC_TIMEOUT_MS) {
   const signals = [AbortSignal.timeout(timeoutMs)];
   if (signal !== undefined) signals.push(signal);
   return AbortSignal.any(signals);
-}
-
-async function waitForExit(child, timeoutMs) {
-  if (child.exitCode !== null || child.signalCode !== null) return true;
-  return Promise.race([
-    new Promise((resolveExit) => child.once("exit", () => resolveExit(true))),
-    delay(timeoutMs).then(() => false),
-  ]);
 }
 
 async function withNamedLock(lockKey, busyMessage, operation) {
@@ -122,14 +105,41 @@ async function withSessionLock(sessionId, operation) {
   );
 }
 
-async function withHostRunLock(operation) {
-  if (hostRunBusy) throw new Error("DSH Host is busy with another run");
-  hostRunBusy = true;
+function quarantinePath(scopeKey) {
+  const name = createHash("sha256").update(scopeKey).digest("hex");
+  return join(QUARANTINE_DIR, `${name}.json`);
+}
+
+async function quarantineExecutionScope(scopeKey, sessionId) {
+  if (scopeKey === undefined) return;
+  await mkdir(QUARANTINE_DIR, { recursive: true, mode: 0o700 });
+  await writeFile(quarantinePath(scopeKey), `${JSON.stringify({
+    scopeKey,
+    sessionId,
+    createdAt: Date.now(),
+  })}\n`, { mode: 0o600 });
+}
+
+async function assertExecutionScopeSettled(scopeKey) {
+  if (scopeKey === undefined) return;
+  const markerPath = quarantinePath(scopeKey);
+  let marker;
   try {
-    return await operation();
-  } finally {
-    hostRunBusy = false;
+    marker = JSON.parse(await readFile(markerPath, "utf8"));
+  } catch (error) {
+    if (error?.code === "ENOENT") return;
+    throw new Error(`Cannot validate quarantined DSH execution scope: ${scopeKey}`, { cause: error });
   }
+  const summary = await sessionSummary(marker.sessionId);
+  if (summary === undefined || summary.running !== true) {
+    await unlink(markerPath).catch((error) => {
+      if (error?.code !== "ENOENT") throw error;
+    });
+    return;
+  }
+  throw new Error(
+    `DSH execution scope remains quarantined while session is running: ${marker.sessionId}`,
+  );
 }
 
 class AsyncStreamQueue {
@@ -178,7 +188,6 @@ class AsyncStreamQueue {
 
 class DshHostBridge {
   constructor() {
-    this.child = undefined;
     this.origin = undefined;
     this.cookie = undefined;
     this.startPromise = undefined;
@@ -196,56 +205,8 @@ class DshHostBridge {
   }
 
   async #startOnce() {
-    const child = spawn(DSH_COMMAND, [...DSH_ARGV_PREFIX, "web", "--no-open", "--port", "0"], {
-      cwd: homedir(),
-      env: process.env,
-      stdio: ["ignore", "pipe", "pipe"],
-    });
-    this.child = child;
-
-    let settled = false;
-    const urlPromise = new Promise((resolveUrl, rejectUrl) => {
-      const timer = setTimeout(() => {
-        rejectUrl(new Error(`DSH Web did not publish a URL within ${START_TIMEOUT_MS} ms`));
-      }, START_TIMEOUT_MS);
-
-      const inspectLine = (line) => {
-        const match = /dsh web:\s+(http:\/\/127\.0\.0\.1:\d+\/\?token=[^\s]+)/.exec(line);
-        if (match === null || settled) return;
-        settled = true;
-        clearTimeout(timer);
-        resolveUrl(match[1]);
-      };
-
-      for (const stream of [child.stdout, child.stderr]) {
-        const lines = createInterface({ input: stream });
-        lines.on("line", (line) => {
-          inspectLine(line);
-          if (!line.includes("?token=")) process.stderr.write(`[dsh] ${line}\n`);
-        });
-      }
-
-      child.once("error", (error) => {
-        if (settled) return;
-        settled = true;
-        clearTimeout(timer);
-        rejectUrl(error);
-      });
-      child.once("exit", (code, signal) => {
-        if (this.child === child) {
-          this.child = undefined;
-          this.origin = undefined;
-          this.cookie = undefined;
-        }
-        if (settled) return;
-        settled = true;
-        clearTimeout(timer);
-        rejectUrl(new Error(`DSH Web exited before startup (code=${code}, signal=${signal})`));
-      });
-    });
-
+    const { origin, launchUrl } = await ensureManagedHost();
     try {
-      const launchUrl = await urlPromise;
       const parsed = new URL(launchUrl);
       const response = await fetch(launchUrl, {
         redirect: "manual",
@@ -259,11 +220,12 @@ class DshHostBridge {
       if (setCookie === null || setCookie === undefined) {
         throw new Error("DSH token exchange returned no browser-session cookie");
       }
-      this.origin = parsed.origin;
+      if (parsed.origin !== origin) throw new Error("Managed DSH Host returned mismatched origins");
+      this.origin = origin;
       this.cookie = setCookie.split(";", 1)[0];
     } catch (error) {
-      child.kill("SIGTERM");
-      if (!(await waitForExit(child, STOP_GRACE_MS))) child.kill("SIGKILL");
+      this.origin = undefined;
+      this.cookie = undefined;
       throw error;
     }
   }
@@ -271,7 +233,7 @@ class DshHostBridge {
   async rpc(method, args, signal, timeoutMs = RPC_TIMEOUT_MS) {
     await this.start();
     const rpcId = randomUUID();
-    const response = await fetch(`${this.origin}/api/${method}`, {
+    let response = await fetch(`${this.origin}/api/${method}`, {
       method: "POST",
       headers: {
         "content-type": "application/json",
@@ -285,6 +247,24 @@ class DshHostBridge {
       }),
       signal: combinedSignal(signal, timeoutMs),
     });
+    if (response.status === 401 || response.status === 403) {
+      await this.stop();
+      await this.start();
+      response = await fetch(`${this.origin}/api/${method}`, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          cookie: this.cookie,
+        },
+        body: JSON.stringify({
+          type: "client-request",
+          rpcId,
+          method,
+          payload: { args },
+        }),
+        signal: combinedSignal(signal, timeoutMs),
+      });
+    }
     if (!response.ok) {
       throw new Error(`DSH RPC ${method} returned HTTP ${response.status}`);
     }
@@ -379,6 +359,11 @@ class DshHostBridge {
       }
     };
     const onError = (error) => fail(error);
+    const onUnexpectedResponse = (_request, response) => {
+      if (response.statusCode === 401 || response.statusCode === 403) void this.stop();
+      fail(new Error(`DSH session follow WebSocket returned HTTP ${response.statusCode}`));
+      websocket.close();
+    };
     const onClose = () => {
       if (!terminal && !signal.aborted) {
         fail(new Error("DSH session follow WebSocket closed unexpectedly"));
@@ -387,6 +372,7 @@ class DshHostBridge {
     websocket.once("open", onOpen);
     websocket.on("message", parseMessage);
     websocket.once("error", onError);
+    websocket.once("unexpected-response", onUnexpectedResponse);
     websocket.once("close", onClose);
     signal.addEventListener("abort", closeForAbort, { once: true });
 
@@ -409,16 +395,8 @@ class DshHostBridge {
   }
 
   async stop() {
-    const child = this.child;
-    this.child = undefined;
     this.origin = undefined;
     this.cookie = undefined;
-    if (child === undefined || child.exitCode !== null) return;
-    child.kill("SIGTERM");
-    if (!(await waitForExit(child, STOP_GRACE_MS))) {
-      child.kill("SIGKILL");
-      await waitForExit(child, STOP_GRACE_MS);
-    }
   }
 }
 
@@ -643,7 +621,7 @@ class SessionTurnFollow {
   }
 }
 
-async function cancelAndSettle(sessionId, requestId, follower) {
+async function cancelAndSettle(sessionId, requestId, follower, executionScope) {
   let confirmation;
   try {
     await bridge.rpc("session/cancel", { request: { sessionId } }, undefined, 5_000);
@@ -662,9 +640,9 @@ async function cancelAndSettle(sessionId, requestId, follower) {
     confirmation.markPromptIssued();
     await confirmation.waitForCompletion();
   } catch (error) {
-    await bridge.stop();
+    await quarantineExecutionScope(executionScope, sessionId);
     throw new Error(
-      `DSH session ${sessionId} did not confirm cancellation; its isolated Host was terminated`,
+      `DSH session ${sessionId} did not confirm cancellation; its writable execution scope was quarantined`,
       { cause: error },
     );
   } finally {
@@ -681,6 +659,7 @@ async function runCreatedSession({
   reasoningEffort,
   timeoutSeconds,
   signal,
+  executionScope,
 }) {
   const before = await sessionSummary(sessionId, signal);
   if (before === undefined) throw new Error(`DSH session does not exist: ${sessionId}`);
@@ -722,8 +701,8 @@ async function runCreatedSession({
     try {
       summary = (await sessionSummary(sessionId)) ?? before;
     } catch {
-      // A result backed by turn/end remains valid even if metadata refresh is
-      // unavailable while the isolated Host is shutting down.
+      // A result backed by turn/end remains valid even if the shared Host's
+      // metadata endpoint is briefly unavailable.
     }
     const projections = summary.projections?.values ?? {};
     return {
@@ -741,7 +720,7 @@ async function runCreatedSession({
   } catch (error) {
     if (promptMayBeRunning) {
       try {
-        await cancelAndSettle(sessionId, requestId, follower);
+        await cancelAndSettle(sessionId, requestId, follower, executionScope);
       } catch (cancelError) {
         throw new AggregateError([error, cancelError], `DSH run failed and cancellation was not confirmed`);
       }
@@ -764,7 +743,7 @@ async function invokeDshRunUnlocked({
   session_id: requestedSessionId,
   session_name: requestedSessionName,
   timeout_seconds: timeoutSeconds,
-}, signal, permission) {
+}, signal, permission, executionScope) {
   const workspace = await requireWorkspace(cwd);
   if (requestedSessionId !== undefined && requestedSessionName !== undefined) {
     throw new Error("Provide either session_id or session_name, not both");
@@ -785,6 +764,7 @@ async function invokeDshRunUnlocked({
     reasoningEffort,
     timeoutSeconds,
     signal,
+    executionScope,
   });
 
   let value;
@@ -821,22 +801,19 @@ async function invokeDshRunUnlocked({
 }
 
 async function invokeDshRun(args, signal, permission) {
-  return withHostRunLock(async () => {
-    if (permission === "read-only") {
-      return invokeDshRunUnlocked(args, signal, permission);
-    }
+  if (permission === "read-only") {
+    return invokeDshRunUnlocked(args, signal, permission);
+  }
 
-    const workspace = await requireWorkspace(args.cwd);
-    const lockKey = permission === "danger-full-access"
-      ? "execution-scope:danger-full-access"
-      : `execution-scope:workspace-write:${workspace}`;
-    const busyMessage = permission === "danger-full-access"
-      ? "Another danger-full-access DSH run is already active"
-      : `Another workspace-write DSH run is already active for: ${workspace}`;
-    return withNamedLock(lockKey, busyMessage, () => invokeDshRunUnlocked({
+  const workspace = await requireWorkspace(args.cwd);
+  const lockKey = "execution-scope:any-write";
+  const busyMessage = "Another write-capable DSH run is already active";
+  return withNamedLock(lockKey, busyMessage, async () => {
+    await assertExecutionScopeSettled(lockKey);
+    return invokeDshRunUnlocked({
       ...args,
       cwd: workspace,
-    }, signal, permission));
+    }, signal, permission, lockKey);
   });
 }
 
@@ -867,7 +844,7 @@ async function invokeSessionGet(args, signal) {
 }
 
 async function invokeSessionClose(args, signal) {
-  return withHostRunLock(() => withResolvedSessionLock(args, signal, async (summary) => {
+  return withResolvedSessionLock(args, signal, async (summary) => {
     if (summary.running) throw new Error(`DSH session is still running: ${summary.sessionId}`);
     await bridge.rpc("workspace/archiveSession", {
       request: { sessionId: summary.sessionId },
@@ -883,7 +860,7 @@ async function invokeSessionClose(args, signal) {
       content: [{ type: "text", text: JSON.stringify(value, null, 2) }],
       structuredContent: value,
     };
-  }));
+  });
 }
 
 const commonRunInputSchema = {
@@ -908,7 +885,7 @@ const sessionReferenceInputSchema = {
 };
 
 const server = new McpServer(
-  { name: "helpme-dsh", version: "0.4.0" },
+  { name: "helpme-dsh", version: "0.5.0" },
   {
     instructions:
       "Delegate bounded coding, analysis, debugging, and review tasks to DeepSeek Harness. Normally call dsh_run directly with cwd set to the active workspace; omitted controls default to standard mode, workspace-write, deepseek-official/deepseek-flash, and high reasoning. Give a new long-lived subagent a session_name; reuse that name or the returned sessionId when the user says continue, and do not create a fresh session in that case. Use dsh_sessions only to resolve ambiguity, dsh_session_get for one summary, and dsh_session_close to archive a finished session without deleting its history. Call dsh_capabilities only for live alternatives. Use dsh_run_danger only for an explicit unrestricted-access request. Never expose DSH credentials, tokens, or cookies.",
@@ -942,8 +919,10 @@ server.registerTool(
       sessionManagement: {
         readableNames: true,
         multipleSessions: true,
-        parallelRunsPerMcpConnection: false,
-        parallelMcpPoolSize: 3,
+        sharedUiOrigin: "http://127.0.0.1:3080",
+        managedSingletonHost: true,
+        parallelRunsPerMcpConnection: true,
+        writeCapableRunsParallel: false,
         sameWritableWorkspaceParallel: false,
         dangerFullAccessParallel: false,
         closeBehavior: "archive-with-history-retained",
@@ -1054,11 +1033,5 @@ for (const signal of ["SIGINT", "SIGTERM"]) {
     process.exit(0);
   });
 }
-
-process.once("exit", () => {
-  if (bridge.child !== undefined && bridge.child.exitCode === null) {
-    bridge.child.kill("SIGTERM");
-  }
-});
 
 await server.connect(new StdioServerTransport());

@@ -12,6 +12,8 @@ if ! command -v codex >/dev/null 2>&1; then
   exit 1
 fi
 
+node "$PLUGIN_ROOT/server/host-cli.mjs" stop
+
 if codex plugin list --json | grep -Fq '"pluginId": "helpme-dsh@helpme-dsh-team"'; then
   codex plugin remove helpme-dsh@helpme-dsh-team
 fi
@@ -39,4 +41,4 @@ if [ -L "$PLUGIN_COMMAND" ] && [ "$(readlink "$PLUGIN_COMMAND")" = "$PLUGIN_ROOT
   rm "$PLUGIN_COMMAND"
 fi
 
-echo "helpme-dsh uninstalled. DSH credentials, sessions, workspace allowlist, and marketplace registration were preserved."
+echo "helpme-dsh uninstalled and its managed Host was stopped. DSH credentials, sessions, workspace allowlist, and marketplace registration were preserved."

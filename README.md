@@ -7,7 +7,8 @@ Open-source plugin that connects Codex App and Codex CLI to a local DeepSeek Har
 - `dsh_run` for `read-only` and `workspace-write` sessions
 - `dsh_run_danger` for explicitly approved `danger-full-access` sessions
 - `dsh_sessions`, `dsh_session_get`, and `dsh_session_close` for persistent session management
-- a three-process MCP pool for up to three independent concurrent DSH runs
+- one plugin-managed DSH Host at `127.0.0.1:3080`, shared by Codex and the browser UI
+- concurrent subagents as independent Sessions inside that Host
 - per-call work mode, model, reasoning effort, workspace, timeout, and session controls
 - event-driven completion from request-correlated persisted Session events; it returns only the final response and does not forward token streams
 - cancellation forwarding and cross-process session locking
@@ -15,8 +16,8 @@ Open-source plugin that connects Codex App and Codex CLI to a local DeepSeek Har
 - self-describing MCP initialization instructions, tool descriptions, schemas, defaults, and safety annotations
 
 The plugin does not install a Codex custom subagent or Skill. Requests for a
-"DeepSeek subagent" are routed across `helpme_dsh`, `helpme_dsh_2`, and
-`helpme_dsh_3`.
+"DeepSeek subagent" are routed to `helpme_dsh`; each call can create or continue
+an independent Session in the shared Host.
 
 Default DSH controls are:
 
@@ -45,11 +46,15 @@ cd helpme-dsh
 ./plugins/helpme-dsh/scripts/install.sh
 ```
 
-Then configure DSH once if the user has not already done so:
+The installer starts the managed Host. Open its shared UI to authenticate DSH
+or inspect Codex-created Sessions:
 
 ```bash
-./plugins/helpme-dsh/server/node_modules/.bin/dsh web
+helpme-dsh ui
 ```
+
+On a headless remote host, this prints a secret authentication URL. Forward
+local port `3080` to remote `127.0.0.1:3080`, then open that URL locally.
 
 Quit and reopen Codex App, or start a new Codex CLI session.
 Review and trust the plugin's `SessionStart` hook when Codex prompts you.
@@ -68,8 +73,8 @@ helpme-dsh
 
 `helpme-dsh update` is an equivalent explicit form. The updater requires a
 clean checkout, performs a fast-forward-only pull, re-executes itself if the
-updater changed, refreshes pinned runtime dependencies, and asks Codex to
-update the existing plugin registration in place. It does not call
+updater changed, restarts the managed Host, refreshes pinned runtime dependencies,
+and asks Codex to update the existing plugin registration in place. It does not call
 `codex plugin remove` and does not modify DSH credentials, Web profiles,
 workspace files, or persisted sessions.
 
@@ -101,7 +106,7 @@ From a clone:
 ./plugins/helpme-dsh/scripts/uninstall.sh
 ```
 
-This removes the installed plugin cache, the `helpme-dsh` CLI symlink, known
+This stops the managed Host and removes the installed plugin cache, the `helpme-dsh` CLI symlink, known
 legacy custom-agent files, and the exact legacy `agents.dsh_subagent`
 configuration block. It also removes the unchanged global `AGENTS.md` block
 managed by HelpMe DSH, while preserving user-authored or modified rules.
@@ -161,18 +166,23 @@ and `dsh_session_get` reads one summary without resuming it. `dsh_session_close`
 archives a completed session from visible DSH lists while retaining its history;
 it never deletes workspace files and rejects a session that is still running.
 
-Multiple DSH sessions may coexist. One MCP connection serializes active runs,
-while the three independent MCP processes allow up to three active runs.
-Cross-process locks prevent concurrent use of the same DSH session, concurrent
-`workspace-write` runs in the same workspace, and concurrent
-`danger-full-access` runs. Read-only runs may share a workspace.
+Multiple DSH Sessions may coexist and run concurrently through one MCP server
+and one managed DSH Host. All Sessions appear in the same browser UI.
+Cross-process locks prevent concurrent use of the same DSH Session. All
+write-capable runs are globally serialized so `danger-full-access` cannot
+overlap or bypass a quarantined `workspace-write` run. Read-only runs may run
+concurrently and share a workspace.
 
-For example, ask Codex to use all three pool slots for independent work:
+For example, ask Codex to create three independent Sessions in parallel:
 
 ```text
-Run these three read-only DSH tasks in parallel using helpme_dsh,
-helpme_dsh_2, and helpme_dsh_3, one task per MCP instance.
+Run these three read-only DSH subagent tasks in parallel using helpme_dsh,
+with a distinct session_name for each task.
 ```
+
+Host lifecycle commands are `helpme-dsh host start`, `status`, `stop`, and
+`restart`. Port `3080` is intentionally exclusive: if another process owns it,
+HelpMe DSH reports the conflict and never kills that process automatically.
 
 `danger-full-access` is a separate MCP tool and must keep interactive approval enabled. Do not weaken this policy in team configuration.
 

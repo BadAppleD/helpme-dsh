@@ -20,6 +20,8 @@ SKIP_PULL=false
 usage() {
   cat <<'EOF'
 Usage: helpme-dsh [update] [--skip-pull]
+       helpme-dsh ui
+       helpme-dsh host {start|status|stop|restart}
 
 Update an existing helpme-dsh installation in place.
 
@@ -27,6 +29,16 @@ Update an existing helpme-dsh installation in place.
                Intended for local development or an externally synchronized clone.
 EOF
 }
+
+case "${1-}" in
+  ui)
+    exec node "$PLUGIN_ROOT/server/host-cli.mjs" ui
+    ;;
+  host)
+    shift
+    exec node "$PLUGIN_ROOT/server/host-cli.mjs" "${1:-status}"
+    ;;
+esac
 
 if [ "${1-}" = "update" ]; then
   shift
@@ -86,11 +98,13 @@ if [ "$SKIP_PULL" = false ]; then
   fi
 fi
 
+node "$PLUGIN_ROOT/server/host-cli.mjs" stop
 npm --prefix "$PLUGIN_ROOT/server" ci
 codex plugin add "$PLUGIN_ID"
 node "$PLUGIN_ROOT/scripts/global-agent-rule.mjs"
 mkdir -p "$PLUGIN_COMMAND_DIR"
 ln -sfn "$PLUGIN_ROOT/scripts/update.sh" "$PLUGIN_COMMAND"
+node "$PLUGIN_ROOT/server/host-cli.mjs" start
 
 VERSION=$(node -e '
   const manifest = require(process.argv[1]);

@@ -123,5 +123,9 @@ test("server has no session-list completion polling", async () => {
   assert.doesNotMatch(cancellation, /sessionSummary|while\s*\(/);
   assert.match(cancellation, /CANCEL_CONFIRM_GRACE_MS/);
   assert.match(cancellation, /session\/cancel[\s\S]*?confirmation\.waitForCompletion\(\)/);
-  assert.match(cancellation, /bridge\.stop\(\)/);
+  assert.match(cancellation, /quarantineExecutionScope/);
+  assert.doesNotMatch(cancellation, /bridge\.stop\(\)/);
+  assert.match(source, /const lockKey = "execution-scope:any-write"/);
+  assert.doesNotMatch(source, /execution-scope:danger-full-access/);
+  assert.doesNotMatch(source, /execution-scope:workspace-write:/);
 });

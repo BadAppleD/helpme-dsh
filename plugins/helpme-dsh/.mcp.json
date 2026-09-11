@@ -16,40 +16,6 @@
           "approval_mode": "prompt"
         }
       }
-    },
-    "helpme_dsh_2": {
-      "command": "./scripts/launch-mcp",
-      "args": [],
-      "cwd": ".",
-      "env_vars": ["DSH_ALLOWED_ROOTS", "DSH_BINARY"],
-      "startup_timeout_sec": 180,
-      "tool_timeout_sec": 3600,
-      "default_tools_approval_mode": "approve",
-      "tools": {
-        "dsh_session_close": {
-          "approval_mode": "prompt"
-        },
-        "dsh_run_danger": {
-          "approval_mode": "prompt"
-        }
-      }
-    },
-    "helpme_dsh_3": {
-      "command": "./scripts/launch-mcp",
-      "args": [],
-      "cwd": ".",
-      "env_vars": ["DSH_ALLOWED_ROOTS", "DSH_BINARY"],
-      "startup_timeout_sec": 180,
-      "tool_timeout_sec": 3600,
-      "default_tools_approval_mode": "approve",
-      "tools": {
-        "dsh_session_close": {
-          "approval_mode": "prompt"
-        },
-        "dsh_run_danger": {
-          "approval_mode": "prompt"
-        }
-      }
     }
   }
 }

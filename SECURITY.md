@@ -12,7 +12,11 @@ does not delete workspace files.
 
 ## Credentials
 
-DSH authentication remains in the user's local DSH configuration. The MCP bridge keeps its loopback launch token and session cookie in memory and never includes them in tool results.
+DSH authentication remains in the user's local DSH configuration. The managed
+Host keeps its loopback launch token in memory behind a user-only Unix socket;
+each MCP bridge keeps its session cookie in memory. Runtime state is stored in
+`~/.config/helpme-dsh/runtime` with user-only permissions and never contains the
+launch token or cookie. Neither secret is included in MCP tool results or logs.
 
 Never commit:
 
