@@ -174,8 +174,8 @@ Sessions may run concurrently with `read-only`, `workspace-write`, or
 each write-capable Session a non-overlapping task and file ownership boundary;
 HelpMe DSH does not detect or merge conflicting edits.
 
-`timeout_seconds` accepts `10` through `1800` seconds. The default remains
-`600` seconds, and the maximum is 30 minutes.
+`timeout_seconds` accepts `10` through `3600` seconds. The default is
+`1800` seconds (30 minutes), and the maximum is 60 minutes.
 
 For example, ask Codex to create three independent Sessions in parallel:
 

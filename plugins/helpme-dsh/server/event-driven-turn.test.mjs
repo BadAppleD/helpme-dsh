@@ -126,7 +126,7 @@ test("server has no session-list completion polling", async () => {
   assert.doesNotMatch(cancellation, /quarantineExecutionScope/);
   assert.doesNotMatch(cancellation, /bridge\.stop\(\)/);
   assert.doesNotMatch(source, /execution-scope:/);
-  assert.match(source, /max\(1800\)/);
+  assert.match(source, /max\(3600\)\.default\(1800\)/);
 });
 
 test("different sessions can write concurrently while one session remains locked", async () => {
@@ -136,6 +136,7 @@ test("different sessions can write concurrently while one session remains locked
   assert.doesNotMatch(source, /Another write-capable DSH run is already active/);
 
   const config = JSON.parse(await readFile(new URL("../.mcp.json", import.meta.url), "utf8"));
+  assert.ok(config.mcpServers.helpme_dsh.tool_timeout_sec > 3600);
   assert.equal(
     config.mcpServers.helpme_dsh.tools.dsh_run_danger.approval_mode,
     "prompt",

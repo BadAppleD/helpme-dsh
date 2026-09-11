@@ -820,8 +820,8 @@ const commonRunInputSchema = {
   session_name: z.string().min(1).max(80).optional().describe(
     "Readable persistent DSH session name. Reuses an existing matching session or creates and names a new one. Do not combine with session_id.",
   ),
-  timeout_seconds: z.number().int().min(10).max(1800).default(600).describe(
-    "Maximum run time in seconds; capped at 1800 seconds (30 minutes).",
+  timeout_seconds: z.number().int().min(10).max(3600).default(1800).describe(
+    "Maximum run time in seconds; defaults to 1800 seconds (30 minutes) and is capped at 3600 seconds (60 minutes).",
   ),
 };
 
@@ -836,7 +836,7 @@ const server = new McpServer(
   { name: "helpme-dsh", version: "0.5.0" },
   {
     instructions:
-      "Delegate bounded coding, analysis, debugging, and review tasks to DeepSeek Harness. Normally call dsh_run directly with cwd set to the active workspace; omitted controls default to standard mode, workspace-write, deepseek-official/deepseek-flash, and high reasoning. Independent sessions, including write-capable sessions, may run concurrently; give each one a non-overlapping task and never invoke the same session concurrently. Give a new long-lived subagent a session_name; reuse that name or the returned sessionId when the user says continue, and do not create a fresh session in that case. Use dsh_sessions only to resolve ambiguity, dsh_session_get for one summary, and dsh_session_close to archive a finished session without deleting its history. Call dsh_capabilities only for live alternatives. Use dsh_run_danger only for an explicit unrestricted-access request. Never expose DSH credentials, tokens, or cookies.",
+      "Delegate bounded coding, analysis, debugging, and review tasks to DeepSeek Harness. Normally call dsh_run directly with cwd set to the active workspace; omitted controls default to standard mode, workspace-write, deepseek-official/deepseek-flash, high reasoning, and a 30-minute timeout. Independent sessions, including write-capable sessions, may run concurrently; give each one a non-overlapping task and never invoke the same session concurrently. Give a new long-lived subagent a session_name; reuse that name or the returned sessionId when the user says continue, and do not create a fresh session in that case. Use dsh_sessions only to resolve ambiguity, dsh_session_get for one summary, and dsh_session_close to archive a finished session without deleting its history. Call dsh_capabilities only for live alternatives. Use dsh_run_danger only for an explicit unrestricted-access request. Never expose DSH credentials, tokens, or cookies.",
   },
 );
 
@@ -943,7 +943,7 @@ server.registerTool(
   {
     title: "Run a DeepSeek Harness subagent",
     description:
-      "Delegate one bounded coding, analysis, debugging, or review task to DeepSeek Harness. Set session_name to create or continue a readable long-lived subagent, or session_id to continue an exact session; omit both only for a fresh unnamed session. Set cwd to the active workspace. Omitted controls use standard mode, workspace-write, deepseek-official/deepseek-flash, and high reasoning. Returns the final answer, session name, session ID, and effective configuration.",
+      "Delegate one bounded coding, analysis, debugging, or review task to DeepSeek Harness. Set session_name to create or continue a readable long-lived subagent, or session_id to continue an exact session; omit both only for a fresh unnamed session. Set cwd to the active workspace. Omitted controls use standard mode, workspace-write, deepseek-official/deepseek-flash, high reasoning, and a 30-minute timeout. Returns the final answer, session name, session ID, and effective configuration.",
     inputSchema: {
       ...commonRunInputSchema,
       permission: z.enum(SAFE_PERMISSION_PRESETS).default("workspace-write").describe("DSH sandbox and approval preset."),

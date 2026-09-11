@@ -6,7 +6,7 @@
       "cwd": ".",
       "env_vars": ["DSH_ALLOWED_ROOTS", "DSH_BINARY"],
       "startup_timeout_sec": 180,
-      "tool_timeout_sec": 3600,
+      "tool_timeout_sec": 3720,
       "default_tools_approval_mode": "approve",
       "tools": {
         "dsh_session_close": {
