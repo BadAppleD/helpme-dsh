@@ -142,3 +142,16 @@ test("different sessions can write concurrently while one session remains locked
     "prompt",
   );
 });
+
+test("validates session references and cwd before creating a persistent workspace", async () => {
+  const source = await readFile(new URL("./server.mjs", import.meta.url), "utf8");
+  const runStart = source.indexOf("async function invokeDshRunUnlocked");
+  const runEnd = source.indexOf("async function invokeDshRun(", runStart);
+  assert.ok(runStart >= 0 && runEnd > runStart);
+  const run = source.slice(runStart, runEnd);
+
+  const mutualExclusion = run.indexOf("Provide either session_id or session_name");
+  const workspaceCreation = run.indexOf("ensureDshWorkspace");
+  assert.ok(mutualExclusion >= 0 && mutualExclusion < workspaceCreation);
+  assert.match(run, /sessionSummary\(sessionId, signal\)[\s\S]*?existing\.cwd[\s\S]*?ensureDshWorkspace/);
+});

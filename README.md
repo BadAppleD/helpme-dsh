@@ -168,6 +168,9 @@ it never deletes workspace files and rejects a session that is still running.
 
 Multiple DSH Sessions may coexist and run concurrently through one MCP server
 and one managed DSH Host. All Sessions appear in the same browser UI.
+HelpMe DSH automatically creates or reuses a DSH Workspace for each validated
+`cwd`, so Sessions are grouped under that workspace in the UI instead of under
+`Ungrouped`.
 Cross-process locks prevent concurrent use of the same DSH Session. Different
 Sessions may run concurrently with `read-only`, `workspace-write`, or
 `danger-full-access`, including inside the same workspace. The caller must give

@@ -13,6 +13,10 @@ import WebSocket from "ws";
 import { z } from "zod";
 import { EventDrivenTurn } from "./event-driven-turn.mjs";
 import { ensureManagedHost } from "./managed-host.mjs";
+import {
+  createWorkspaceSession,
+  ensureDshWorkspace,
+} from "./workspace-binding.mjs";
 
 const DSH_VERSION = "0.1.5-rc.1";
 const RPC_TIMEOUT_MS = 20_000;
@@ -708,13 +712,22 @@ async function invokeDshRunUnlocked({
   if (requestedSessionId !== undefined && requestedSessionName !== undefined) {
     throw new Error("Provide either session_id or session_name, not both");
   }
-  const create = async (sessionId) => bridge.rpc("session/create", {
-    request: {
-      cwd: workspace,
+  const create = async (sessionId) => {
+    if (sessionId !== undefined) {
+      const existing = await sessionSummary(sessionId, signal);
+      if (existing !== undefined && await realpath(existing.cwd) !== workspace) {
+        throw new Error(
+          `DSH session cwd does not match requested workspace: ${existing.cwd}`,
+        );
+      }
+    }
+    const dshWorkspace = await ensureDshWorkspace(bridge, workspace, signal);
+    return createWorkspaceSession(bridge, {
+      workspaceId: dshWorkspace.workspaceId,
       agentPreset: workMode,
-      ...(sessionId === undefined ? {} : { sessionId }),
-    },
-  }, signal);
+      sessionId,
+    }, signal);
+  };
   const execute = async (sessionId) => runCreatedSession({
     sessionId,
     task,
@@ -869,6 +882,7 @@ server.registerTool(
         multipleSessions: true,
         sharedUiOrigin: "http://127.0.0.1:3080",
         managedSingletonHost: true,
+        automaticWorkspaceGrouping: true,
         parallelRunsPerMcpConnection: true,
         writeCapableRunsParallel: true,
         sameWritableWorkspaceParallel: true,
