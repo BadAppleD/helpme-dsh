@@ -9,7 +9,7 @@ Open-source plugin that connects Codex App and Codex CLI to a local DeepSeek Har
 - `dsh_sessions`, `dsh_session_get`, and `dsh_session_close` for persistent session management
 - a three-process MCP pool for up to three independent concurrent DSH runs
 - per-call work mode, model, reasoning effort, workspace, timeout, and session controls
-- complete DSH responses retrieved by request ID
+- event-driven completion from request-correlated persisted Session events; it returns only the final response and does not forward token streams
 - cancellation forwarding and cross-process session locking
 - a concise `SessionStart` routing hint for startup, resume, clear, and context compaction
 - self-describing MCP initialization instructions, tool descriptions, schemas, defaults, and safety annotations

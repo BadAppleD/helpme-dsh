@@ -7,10 +7,14 @@
   "engines": {
     "node": ">=20"
   },
+  "scripts": {
+    "test": "node --test"
+  },
   "dependencies": {
     "@deepseek-ai/dsh": "0.1.5-rc.1",
     "@modelcontextprotocol/sdk": "1.30.0",
     "proper-lockfile": "4.1.2",
+    "ws": "8.21.3",
     "zod": "3.25.76"
   }
 }

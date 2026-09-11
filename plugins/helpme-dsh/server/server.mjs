@@ -12,7 +12,9 @@ import { fileURLToPath } from "node:url";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import lockfile from "proper-lockfile";
+import WebSocket from "ws";
 import { z } from "zod";
+import { EventDrivenTurn } from "./event-driven-turn.mjs";
 
 const BUNDLED_DSH_ENTRY = fileURLToPath(
   new URL("./node_modules/@deepseek-ai/dsh/lib/bin.js", import.meta.url),
@@ -23,7 +25,9 @@ const DSH_VERSION = "0.1.5-rc.1";
 const START_TIMEOUT_MS = 20_000;
 const RPC_TIMEOUT_MS = 20_000;
 const STOP_GRACE_MS = 3_000;
-const POLL_INTERVAL_MS = 500;
+const CANCEL_CONFIRM_GRACE_MS = 3_000;
+const FOLLOW_RECONNECT_LIMIT = 3;
+const FOLLOW_RECONNECT_DELAY_MS = 200;
 
 const WORK_MODES = ["standard", "ptc", "minimal", "cordis"];
 const PERMISSION_PRESETS = [
@@ -125,6 +129,50 @@ async function withHostRunLock(operation) {
     return await operation();
   } finally {
     hostRunBusy = false;
+  }
+}
+
+class AsyncStreamQueue {
+  #values = [];
+  #waiter;
+  #closed = false;
+  #failure;
+
+  push(value) {
+    if (this.#closed) return;
+    const waiter = this.#waiter;
+    this.#waiter = undefined;
+    if (waiter !== undefined) {
+      waiter.resolve({ value, done: false });
+      return;
+    }
+    this.#values.push(value);
+  }
+
+  close(error) {
+    if (this.#closed) return;
+    this.#closed = true;
+    this.#failure = error;
+    const waiter = this.#waiter;
+    this.#waiter = undefined;
+    if (waiter === undefined) return;
+    if (error === undefined) waiter.resolve({ value: undefined, done: true });
+    else waiter.reject(error);
+  }
+
+  async next() {
+    if (this.#values.length > 0) return { value: this.#values.shift(), done: false };
+    if (this.#closed) {
+      if (this.#failure !== undefined) throw this.#failure;
+      return { value: undefined, done: true };
+    }
+    return new Promise((resolve, reject) => {
+      this.#waiter = { resolve, reject };
+    });
+  }
+
+  [Symbol.asyncIterator]() {
+    return this;
   }
 }
 
@@ -249,6 +297,115 @@ class DshHostBridge {
       throw new Error(`${failure?.code ?? "dsh/error"}: ${failure?.message ?? "unknown DSH failure"}`);
     }
     return envelope.result.value;
+  }
+
+  async *follow(request, signal) {
+    await this.start();
+    const streamId = randomUUID();
+    const queue = new AsyncStreamQueue();
+    const streamOrigin = this.origin.replace(/^http/u, "ws");
+    const websocket = new WebSocket(`${streamOrigin}/api/remote.mux`, {
+      headers: { cookie: this.cookie },
+    });
+    let opened = false;
+    let terminal = false;
+    let openingSettled = false;
+    let resolveOpening;
+    let rejectOpening;
+    const opening = new Promise((resolve, reject) => {
+      resolveOpening = resolve;
+      rejectOpening = reject;
+    });
+    const settleOpening = (error) => {
+      if (openingSettled) return;
+      openingSettled = true;
+      if (error === undefined) resolveOpening();
+      else rejectOpening(error);
+    };
+    const fail = (error) => {
+      settleOpening(error);
+      if (!terminal) queue.close(error);
+    };
+    const closeForAbort = () => {
+      const reason = signal.reason instanceof Error
+        ? signal.reason
+        : new Error("DSH session follow was cancelled", { cause: signal.reason });
+      fail(reason);
+      websocket.close();
+    };
+    const parseMessage = (data) => {
+      let frame;
+      try {
+        frame = JSON.parse(Buffer.from(data).toString("utf8"));
+      } catch (error) {
+        fail(new Error("DSH session follow delivered invalid JSON", { cause: error }));
+        websocket.close();
+        return;
+      }
+      if (frame?.streamId !== streamId) return;
+      if (frame.type === "item") {
+        queue.push(frame.value);
+        return;
+      }
+      if (frame.type === "end") {
+        terminal = true;
+        queue.close();
+        return;
+      }
+      if (frame.type === "error") {
+        const failure = frame.error;
+        const code = typeof failure?.code === "string" ? failure.code : "dsh/stream-error";
+        const message = typeof failure?.message === "string"
+          ? failure.message
+          : "DSH session follow failed";
+        fail(new Error(`${code}: ${message}`));
+        return;
+      }
+      fail(new Error("DSH session follow delivered an invalid stream frame"));
+      websocket.close();
+    };
+    const onOpen = () => {
+      opened = true;
+      try {
+        websocket.send(JSON.stringify({
+          type: "open",
+          streamId,
+          endpoint: "session/follow",
+          payload: { args: { request } },
+        }));
+        settleOpening();
+      } catch (error) {
+        fail(error);
+      }
+    };
+    const onError = (error) => fail(error);
+    const onClose = () => {
+      if (!terminal && !signal.aborted) {
+        fail(new Error("DSH session follow WebSocket closed unexpectedly"));
+      }
+    };
+    websocket.once("open", onOpen);
+    websocket.on("message", parseMessage);
+    websocket.once("error", onError);
+    websocket.once("close", onClose);
+    signal.addEventListener("abort", closeForAbort, { once: true });
+
+    try {
+      if (signal.aborted) closeForAbort();
+      await opening;
+      for await (const frame of queue) yield frame;
+    } finally {
+      signal.removeEventListener("abort", closeForAbort);
+      websocket.removeListener("message", parseMessage);
+      if (opened && !terminal && websocket.readyState === WebSocket.OPEN) {
+        websocket.send(JSON.stringify({ type: "cancel", streamId }));
+      }
+      terminal = true;
+      queue.close();
+      if (websocket.readyState === WebSocket.CONNECTING || websocket.readyState === WebSocket.OPEN) {
+        websocket.close();
+      }
+    }
   }
 
   async stop() {
@@ -397,96 +554,122 @@ async function withResolvedSessionLock({ session_id: sessionId, session_name: se
   });
 }
 
-async function waitForTurn(sessionId, previousTurns, timeoutSeconds, signal) {
-  const deadline = Date.now() + timeoutSeconds * 1_000;
-  while (Date.now() < deadline) {
-    signal?.throwIfAborted();
-    const summary = await sessionSummary(sessionId, signal);
-    const turns = summary?.projections?.values?.turnOutline;
-    if (
-      summary !== undefined &&
-      summary.running === false &&
-      Array.isArray(turns) &&
-      turns.length > previousTurns
-    ) {
-      return summary;
-    }
-    await delay(POLL_INTERVAL_MS, undefined, signal === undefined ? {} : { signal });
-  }
-  throw new Error(`DSH session ${sessionId} did not finish within ${timeoutSeconds} seconds`);
-}
+class SessionTurnFollow {
+  #sessionId;
+  #signal;
+  #abort = new AbortController();
+  #iterator;
+  #turn;
+  #closed = false;
 
-async function fullResponse(sessionId, summary, requestId, signal) {
-  const throughSeq = summary?.projections?.asOfSeq;
-  if (!Number.isSafeInteger(throughSeq)) throw new Error("DSH session has no stable event cursor");
-  let beforeSeq;
-  const records = [];
-  for (let pageNumber = 0; pageNumber < 20; pageNumber += 1) {
-    const page = await bridge.rpc("session/page", {
-      request: {
-        address: { kind: "session", sessionId },
-        throughSeq,
-        maxMessages: 100,
-        ...(beforeSeq === undefined ? {} : { beforeSeq }),
-      },
-    }, signal);
-    records.unshift(...page.records);
-    const requestRecord = records.find(({ event }) =>
-      event?.type === "user/message" && event.data?.source?.rpcId === requestId);
-    if (requestRecord !== undefined) break;
-    if (!page.hasMore || page.records.length === 0) {
-      throw new Error(`DSH completed but request ${requestId} was not found in session history`);
-    }
-    beforeSeq = page.records[0].event.seq - 1;
+  constructor(sessionId, requestId, timeoutSeconds, signal, { requireResponse = true } = {}) {
+    this.#sessionId = sessionId;
+    const signals = [this.#abort.signal, AbortSignal.timeout(timeoutSeconds * 1_000)];
+    if (signal !== undefined) signals.push(signal);
+    this.#signal = AbortSignal.any(signals);
+    this.#turn = new EventDrivenTurn(requestId, { requireResponse });
   }
 
-  const requestRecord = records.find(({ event }) =>
-    event?.type === "user/message" && event.data?.source?.rpcId === requestId);
-  if (requestRecord === undefined) throw new Error("DSH request history exceeded the paging safety limit");
-  const turnStart = records
-    .filter(({ event }) => event?.type === "turn/start" && event.seq <= requestRecord.event.seq)
-    .at(-1);
-  const turn = turnStart?.event?.data?.turn;
-  if (!Number.isSafeInteger(turn)) throw new Error("DSH response has no matching turn boundary");
-  const messages = records
-    .filter(({ event }) => event?.type === "assistant/message" && event.data?.turn === turn)
-    .map(({ event }) => event.data.message?.content)
-    .filter(Array.isArray)
-    .map((content) => content
-      .filter((block) => block?.type === "text" && typeof block.text === "string")
-      .map((block) => block.text)
-      .join(""))
-    .filter((text) => text.trim().length > 0);
-  const response = messages.at(-1);
-  if (response === undefined) throw new Error(`DSH turn ${turn} produced no final assistant text`);
-  return response;
+  async open() {
+    await this.#openStream();
+  }
+
+  markPromptIssued() {
+    this.#turn.markPromptIssued();
+  }
+
+  async waitForCompletion() {
+    let reconnects = 0;
+    while (this.#turn.completion === undefined) {
+      try {
+        const frame = await this.#iterator.next();
+        if (frame.done) throw new Error("DSH session follow ended before turn completion");
+        this.#turn.accept(frame.value);
+      } catch (error) {
+        if (this.#signal.aborted) {
+          throw this.#signal.reason instanceof Error
+            ? this.#signal.reason
+            : new Error("DSH session follow was cancelled", { cause: this.#signal.reason });
+        }
+        if (reconnects >= FOLLOW_RECONNECT_LIMIT) {
+          throw new Error(
+            `DSH session follow disconnected ${FOLLOW_RECONNECT_LIMIT} times`,
+            { cause: error },
+          );
+        }
+        reconnects += 1;
+        await this.#releaseStream();
+        await delay(FOLLOW_RECONNECT_DELAY_MS, undefined, { signal: this.#signal });
+        await this.#openStream();
+      }
+    }
+    return this.#turn.completion;
+  }
+
+  async close() {
+    if (this.#closed) return;
+    this.#closed = true;
+    this.#abort.abort();
+    await this.#releaseStream();
+  }
+
+  async #openStream() {
+    this.#signal.throwIfAborted();
+    const stream = bridge.follow({
+      address: { kind: "session", sessionId: this.#sessionId },
+      maxMessages: 1_000,
+    }, this.#signal);
+    this.#iterator = stream[Symbol.asyncIterator]();
+    const opening = await this.#iterator.next();
+    if (opening.done || opening.value?.type !== "snapshot") {
+      throw new Error("DSH session follow did not confirm its opening snapshot");
+    }
+    if (opening.value.header?.id !== this.#sessionId) {
+      throw new Error("DSH session follow snapshot identified the wrong session");
+    }
+    this.#turn.accept(opening.value);
+  }
+
+  async #releaseStream() {
+    const iterator = this.#iterator;
+    this.#iterator = undefined;
+    if (iterator === undefined) return;
+    try {
+      await iterator.return?.();
+    } catch {
+      // The next reconnect or cancellation request is authoritative. A broken
+      // carrier should not hide the original turn failure.
+    }
+  }
 }
 
-async function cancelAndSettle(sessionId) {
-  let cancelFailure;
+async function cancelAndSettle(sessionId, requestId, follower) {
+  let confirmation;
   try {
     await bridge.rpc("session/cancel", { request: { sessionId } }, undefined, 5_000);
+    // The original caller's AbortSignal may already have fired. Reopen the
+    // durable stream with an independent grace timeout and do not release the
+    // session lock until the exact prompt's turn has ended.
+    await follower.close();
+    confirmation = new SessionTurnFollow(
+      sessionId,
+      requestId,
+      CANCEL_CONFIRM_GRACE_MS / 1_000,
+      undefined,
+      { requireResponse: false },
+    );
+    await confirmation.open();
+    confirmation.markPromptIssued();
+    await confirmation.waitForCompletion();
   } catch (error) {
-    cancelFailure = error;
+    await bridge.stop();
+    throw new Error(
+      `DSH session ${sessionId} did not confirm cancellation; its isolated Host was terminated`,
+      { cause: error },
+    );
+  } finally {
+    await confirmation?.close();
   }
-  if (cancelFailure === undefined) {
-    const deadline = Date.now() + STOP_GRACE_MS;
-    while (Date.now() < deadline) {
-      try {
-        const summary = await sessionSummary(sessionId);
-        if (summary === undefined || summary.running === false) return;
-      } catch (error) {
-        cancelFailure = error;
-        break;
-      }
-      await delay(POLL_INTERVAL_MS);
-    }
-  }
-  await bridge.stop();
-  throw new Error(
-    `DSH session ${sessionId} did not confirm cancellation; its isolated Host was terminated`,
-    cancelFailure === undefined ? undefined : { cause: cancelFailure },
-  );
 }
 
 async function runCreatedSession({
@@ -502,7 +685,6 @@ async function runCreatedSession({
   const before = await sessionSummary(sessionId, signal);
   if (before === undefined) throw new Error(`DSH session does not exist: ${sessionId}`);
   if (before.running === true) throw new Error(`DSH session is already running: ${sessionId}`);
-  const previousTurns = before.projections?.values?.turnOutline?.length ?? 0;
 
   await bridge.rpc("session/selectModel", {
     request: { sessionId, provider, model, reasoningEffort },
@@ -517,9 +699,14 @@ async function runCreatedSession({
   }
 
   const requestId = randomUUID();
+  const follower = new SessionTurnFollow(sessionId, requestId, timeoutSeconds, signal);
   let promptMayBeRunning = false;
   try {
+    // The durable snapshot must arrive before prompt submission, otherwise a
+    // very short task could complete before the subscriber is attached.
+    await follower.open();
     promptMayBeRunning = true;
+    follower.markPromptIssued();
     await bridge.rpc("session/prompt", {
       request: {
         requestId,
@@ -529,13 +716,20 @@ async function runCreatedSession({
         clientTimeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
       },
     }, signal);
-    const summary = await waitForTurn(sessionId, previousTurns, timeoutSeconds, signal);
-    const response = await fullResponse(sessionId, summary, requestId, signal);
+    const completion = await follower.waitForCompletion();
+    // This is one post-completion metadata lookup, not the completion signal.
+    let summary = before;
+    try {
+      summary = (await sessionSummary(sessionId)) ?? before;
+    } catch {
+      // A result backed by turn/end remains valid even if metadata refresh is
+      // unavailable while the isolated Host is shutting down.
+    }
     const projections = summary.projections?.values ?? {};
     return {
       sessionId,
       sessionName: sessionTitle(summary) ?? null,
-      response,
+      response: completion.response,
       effective: {
         cwd: summary.cwd,
         workMode: projections.agentPreset,
@@ -547,12 +741,16 @@ async function runCreatedSession({
   } catch (error) {
     if (promptMayBeRunning) {
       try {
-        await cancelAndSettle(sessionId);
+        await cancelAndSettle(sessionId, requestId, follower);
       } catch (cancelError) {
         throw new AggregateError([error, cancelError], `DSH run failed and cancellation was not confirmed`);
       }
+    } else {
+      await follower.close();
     }
     throw error;
+  } finally {
+    await follower.close();
   }
 }
 
