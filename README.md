@@ -26,7 +26,7 @@ work_mode=standard
 permission=workspace-write
 provider=deepseek-official
 model=deepseek-flash
-reasoning_effort=high
+reasoning_effort=max
 ```
 
 ## Requirements
