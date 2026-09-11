@@ -11,7 +11,7 @@ Open-source plugin that connects Codex App and Codex CLI to a local DeepSeek Har
 - concurrent subagents as independent Sessions inside that Host
 - per-call work mode, model, reasoning effort, workspace, timeout, and session controls
 - event-driven completion from request-correlated persisted Session events; it returns only the final response and does not forward token streams
-- cancellation forwarding and cross-process session locking
+- cancellation forwarding and same-Session cross-process locking
 - a concise `SessionStart` routing hint for startup, resume, clear, and context compaction
 - self-describing MCP initialization instructions, tool descriptions, schemas, defaults, and safety annotations
 
@@ -168,10 +168,14 @@ it never deletes workspace files and rejects a session that is still running.
 
 Multiple DSH Sessions may coexist and run concurrently through one MCP server
 and one managed DSH Host. All Sessions appear in the same browser UI.
-Cross-process locks prevent concurrent use of the same DSH Session. All
-write-capable runs are globally serialized so `danger-full-access` cannot
-overlap or bypass a quarantined `workspace-write` run. Read-only runs may run
-concurrently and share a workspace.
+Cross-process locks prevent concurrent use of the same DSH Session. Different
+Sessions may run concurrently with `read-only`, `workspace-write`, or
+`danger-full-access`, including inside the same workspace. The caller must give
+each write-capable Session a non-overlapping task and file ownership boundary;
+HelpMe DSH does not detect or merge conflicting edits.
+
+`timeout_seconds` accepts `10` through `1800` seconds. The default remains
+`600` seconds, and the maximum is 30 minutes.
 
 For example, ask Codex to create three independent Sessions in parallel:
 
@@ -184,7 +188,7 @@ Host lifecycle commands are `helpme-dsh host start`, `status`, `stop`, and
 `restart`. Port `3080` is intentionally exclusive: if another process owns it,
 HelpMe DSH reports the conflict and never kills that process automatically.
 
-`danger-full-access` is a separate MCP tool and must keep interactive approval enabled. Do not weaken this policy in team configuration.
+`danger-full-access` is a separate MCP tool and must keep interactive approval enabled. Parallel execution does not remove that approval requirement.
 
 ## Development
 

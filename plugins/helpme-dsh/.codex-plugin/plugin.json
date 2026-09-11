@@ -1,6 +1,6 @@
 {
   "name": "helpme-dsh",
-  "version": "0.5.0+codex.20260911035302",
+  "version": "0.5.0+codex.20260911041535",
   "description": "Delegate local Codex tasks to DeepSeek Harness through a self-describing MCP server.",
   "author": {
     "name": "Steven Deng",
@@ -28,7 +28,7 @@
     "defaultPrompt": [
       "Ask DSH to inspect this workspace with the default settings.",
       "Delegate this task to DSH in read-only mode.",
-      "Run three independent DSH tasks in parallel.",
+      "Run three independent DSH tasks in parallel with non-overlapping file ownership.",
       "Create a named DSH session and continue it later.",
       "List my visible DSH sessions."
     ]

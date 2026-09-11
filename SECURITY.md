@@ -6,6 +6,10 @@
 
 `danger-full-access` is exposed through a separate MCP tool configured for interactive approval. Do not configure it for automatic approval.
 
+Different Sessions may run write-capable tasks concurrently, including in the
+same workspace. Assign explicit, non-overlapping task and file ownership; the
+plugin does not prevent conflicting edits between different Sessions.
+
 `dsh_session_close` is also configured for interactive approval. It archives a
 session from visible DSH lists but deliberately retains the session history and
 does not delete workspace files.

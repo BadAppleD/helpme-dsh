@@ -2,7 +2,7 @@
 
 import { createHash, randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
-import { mkdir, open, readFile, realpath, stat, unlink, writeFile } from "node:fs/promises";
+import { mkdir, open, realpath, stat } from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
 import { delimiter, join, sep } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
@@ -12,7 +12,7 @@ import lockfile from "proper-lockfile";
 import WebSocket from "ws";
 import { z } from "zod";
 import { EventDrivenTurn } from "./event-driven-turn.mjs";
-import { ensureManagedHost, managedHostPaths } from "./managed-host.mjs";
+import { ensureManagedHost } from "./managed-host.mjs";
 
 const DSH_VERSION = "0.1.5-rc.1";
 const RPC_TIMEOUT_MS = 20_000;
@@ -48,7 +48,6 @@ if (configuredRoots.length === 0) {
   throw new Error("DSH workspace allowlist is empty");
 }
 const SESSION_LOCK_DIR = join(tmpdir(), "codex-dsh-mcp-locks");
-const QUARANTINE_DIR = join(managedHostPaths().runtimeDir, "quarantine");
 
 function normalizeSessionName(value) {
   const name = value.trim();
@@ -102,43 +101,6 @@ async function withSessionLock(sessionId, operation) {
     sessionId,
     `DSH session is busy: ${sessionId}`,
     operation,
-  );
-}
-
-function quarantinePath(scopeKey) {
-  const name = createHash("sha256").update(scopeKey).digest("hex");
-  return join(QUARANTINE_DIR, `${name}.json`);
-}
-
-async function quarantineExecutionScope(scopeKey, sessionId) {
-  if (scopeKey === undefined) return;
-  await mkdir(QUARANTINE_DIR, { recursive: true, mode: 0o700 });
-  await writeFile(quarantinePath(scopeKey), `${JSON.stringify({
-    scopeKey,
-    sessionId,
-    createdAt: Date.now(),
-  })}\n`, { mode: 0o600 });
-}
-
-async function assertExecutionScopeSettled(scopeKey) {
-  if (scopeKey === undefined) return;
-  const markerPath = quarantinePath(scopeKey);
-  let marker;
-  try {
-    marker = JSON.parse(await readFile(markerPath, "utf8"));
-  } catch (error) {
-    if (error?.code === "ENOENT") return;
-    throw new Error(`Cannot validate quarantined DSH execution scope: ${scopeKey}`, { cause: error });
-  }
-  const summary = await sessionSummary(marker.sessionId);
-  if (summary === undefined || summary.running !== true) {
-    await unlink(markerPath).catch((error) => {
-      if (error?.code !== "ENOENT") throw error;
-    });
-    return;
-  }
-  throw new Error(
-    `DSH execution scope remains quarantined while session is running: ${marker.sessionId}`,
   );
 }
 
@@ -621,7 +583,7 @@ class SessionTurnFollow {
   }
 }
 
-async function cancelAndSettle(sessionId, requestId, follower, executionScope) {
+async function cancelAndSettle(sessionId, requestId, follower) {
   let confirmation;
   try {
     await bridge.rpc("session/cancel", { request: { sessionId } }, undefined, 5_000);
@@ -640,9 +602,8 @@ async function cancelAndSettle(sessionId, requestId, follower, executionScope) {
     confirmation.markPromptIssued();
     await confirmation.waitForCompletion();
   } catch (error) {
-    await quarantineExecutionScope(executionScope, sessionId);
     throw new Error(
-      `DSH session ${sessionId} did not confirm cancellation; its writable execution scope was quarantined`,
+      `DSH session ${sessionId} did not confirm cancellation; its state remains uncertain`,
       { cause: error },
     );
   } finally {
@@ -659,7 +620,6 @@ async function runCreatedSession({
   reasoningEffort,
   timeoutSeconds,
   signal,
-  executionScope,
 }) {
   const before = await sessionSummary(sessionId, signal);
   if (before === undefined) throw new Error(`DSH session does not exist: ${sessionId}`);
@@ -720,7 +680,7 @@ async function runCreatedSession({
   } catch (error) {
     if (promptMayBeRunning) {
       try {
-        await cancelAndSettle(sessionId, requestId, follower, executionScope);
+        await cancelAndSettle(sessionId, requestId, follower);
       } catch (cancelError) {
         throw new AggregateError([error, cancelError], `DSH run failed and cancellation was not confirmed`);
       }
@@ -743,7 +703,7 @@ async function invokeDshRunUnlocked({
   session_id: requestedSessionId,
   session_name: requestedSessionName,
   timeout_seconds: timeoutSeconds,
-}, signal, permission, executionScope) {
+}, signal, permission) {
   const workspace = await requireWorkspace(cwd);
   if (requestedSessionId !== undefined && requestedSessionName !== undefined) {
     throw new Error("Provide either session_id or session_name, not both");
@@ -764,7 +724,6 @@ async function invokeDshRunUnlocked({
     reasoningEffort,
     timeoutSeconds,
     signal,
-    executionScope,
   });
 
   let value;
@@ -801,20 +760,7 @@ async function invokeDshRunUnlocked({
 }
 
 async function invokeDshRun(args, signal, permission) {
-  if (permission === "read-only") {
-    return invokeDshRunUnlocked(args, signal, permission);
-  }
-
-  const workspace = await requireWorkspace(args.cwd);
-  const lockKey = "execution-scope:any-write";
-  const busyMessage = "Another write-capable DSH run is already active";
-  return withNamedLock(lockKey, busyMessage, async () => {
-    await assertExecutionScopeSettled(lockKey);
-    return invokeDshRunUnlocked({
-      ...args,
-      cwd: workspace,
-    }, signal, permission, lockKey);
-  });
+  return invokeDshRunUnlocked(args, signal, permission);
 }
 
 async function invokeSessionList({ cwd, include_blank: includeBlank, limit }, signal) {
@@ -874,7 +820,9 @@ const commonRunInputSchema = {
   session_name: z.string().min(1).max(80).optional().describe(
     "Readable persistent DSH session name. Reuses an existing matching session or creates and names a new one. Do not combine with session_id.",
   ),
-  timeout_seconds: z.number().int().min(10).max(3600).default(600),
+  timeout_seconds: z.number().int().min(10).max(1800).default(600).describe(
+    "Maximum run time in seconds; capped at 1800 seconds (30 minutes).",
+  ),
 };
 
 const sessionReferenceInputSchema = {
@@ -888,7 +836,7 @@ const server = new McpServer(
   { name: "helpme-dsh", version: "0.5.0" },
   {
     instructions:
-      "Delegate bounded coding, analysis, debugging, and review tasks to DeepSeek Harness. Normally call dsh_run directly with cwd set to the active workspace; omitted controls default to standard mode, workspace-write, deepseek-official/deepseek-flash, and high reasoning. Give a new long-lived subagent a session_name; reuse that name or the returned sessionId when the user says continue, and do not create a fresh session in that case. Use dsh_sessions only to resolve ambiguity, dsh_session_get for one summary, and dsh_session_close to archive a finished session without deleting its history. Call dsh_capabilities only for live alternatives. Use dsh_run_danger only for an explicit unrestricted-access request. Never expose DSH credentials, tokens, or cookies.",
+      "Delegate bounded coding, analysis, debugging, and review tasks to DeepSeek Harness. Normally call dsh_run directly with cwd set to the active workspace; omitted controls default to standard mode, workspace-write, deepseek-official/deepseek-flash, and high reasoning. Independent sessions, including write-capable sessions, may run concurrently; give each one a non-overlapping task and never invoke the same session concurrently. Give a new long-lived subagent a session_name; reuse that name or the returned sessionId when the user says continue, and do not create a fresh session in that case. Use dsh_sessions only to resolve ambiguity, dsh_session_get for one summary, and dsh_session_close to archive a finished session without deleting its history. Call dsh_capabilities only for live alternatives. Use dsh_run_danger only for an explicit unrestricted-access request. Never expose DSH credentials, tokens, or cookies.",
   },
 );
 
@@ -922,9 +870,9 @@ server.registerTool(
         sharedUiOrigin: "http://127.0.0.1:3080",
         managedSingletonHost: true,
         parallelRunsPerMcpConnection: true,
-        writeCapableRunsParallel: false,
-        sameWritableWorkspaceParallel: false,
-        dangerFullAccessParallel: false,
+        writeCapableRunsParallel: true,
+        sameWritableWorkspaceParallel: true,
+        dangerFullAccessParallel: true,
         closeBehavior: "archive-with-history-retained",
       },
     };

@@ -7,7 +7,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "printf '%s\\n' \"DeepSeek/DSH delegation is available through helpme_dsh. Independent read-only subagents are concurrent sessions in one plugin-managed Host and shared UI at 127.0.0.1:3080. Never run the same session concurrently; write-capable runs are globally serialized. Defaults and controls are self-described by the MCP. Treat 'DeepSeek subagent' as HelpMe DSH, not a Codex custom subagent.\"",
+            "command": "printf '%s\\n' \"DeepSeek/DSH delegation is available through helpme_dsh. Independent subagents, including workspace-write and approved danger-full-access runs, may execute concurrently as sessions in one plugin-managed Host and shared UI at 127.0.0.1:3080. Give concurrent writers non-overlapping tasks and file ownership; never run the same session concurrently. Defaults and controls are self-described by the MCP. Treat 'DeepSeek subagent' as HelpMe DSH, not a Codex custom subagent.\"",
             "timeout": 3,
             "additionalContextLimit": 256
           }

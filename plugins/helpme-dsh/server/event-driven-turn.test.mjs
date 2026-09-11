@@ -123,9 +123,21 @@ test("server has no session-list completion polling", async () => {
   assert.doesNotMatch(cancellation, /sessionSummary|while\s*\(/);
   assert.match(cancellation, /CANCEL_CONFIRM_GRACE_MS/);
   assert.match(cancellation, /session\/cancel[\s\S]*?confirmation\.waitForCompletion\(\)/);
-  assert.match(cancellation, /quarantineExecutionScope/);
+  assert.doesNotMatch(cancellation, /quarantineExecutionScope/);
   assert.doesNotMatch(cancellation, /bridge\.stop\(\)/);
-  assert.match(source, /const lockKey = "execution-scope:any-write"/);
-  assert.doesNotMatch(source, /execution-scope:danger-full-access/);
-  assert.doesNotMatch(source, /execution-scope:workspace-write:/);
+  assert.doesNotMatch(source, /execution-scope:/);
+  assert.match(source, /max\(1800\)/);
+});
+
+test("different sessions can write concurrently while one session remains locked", async () => {
+  const source = await readFile(new URL("./server.mjs", import.meta.url), "utf8");
+  assert.match(source, /async function withSessionLock/);
+  assert.match(source, /return invokeDshRunUnlocked\(args, signal, permission\)/);
+  assert.doesNotMatch(source, /Another write-capable DSH run is already active/);
+
+  const config = JSON.parse(await readFile(new URL("../.mcp.json", import.meta.url), "utf8"));
+  assert.equal(
+    config.mcpServers.helpme_dsh.tools.dsh_run_danger.approval_mode,
+    "prompt",
+  );
 });
