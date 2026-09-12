@@ -31,7 +31,15 @@ const PERMISSION_PRESETS = [
   "danger-full-access",
 ];
 const SAFE_PERMISSION_PRESETS = ["read-only", "workspace-write"];
-const REASONING_EFFORTS = ["off", "low", "high", "max"];
+const REASONING_EFFORTS = [
+  "off",
+  "minimal",
+  "low",
+  "medium",
+  "high",
+  "xhigh",
+  "max",
+];
 
 const allowedRootsFile = join(homedir(), ".config", "helpme-dsh", "allowed-roots");
 let configuredRoots;
@@ -828,7 +836,9 @@ const commonRunInputSchema = {
   work_mode: z.enum(WORK_MODES).default("standard").describe("DSH agent preset."),
   provider: z.string().min(1).default("deepseek-official"),
   model: z.string().min(1).default("deepseek-flash"),
-  reasoning_effort: z.enum(REASONING_EFFORTS).default("max"),
+  reasoning_effort: z.enum(REASONING_EFFORTS).default("max").describe(
+    "Reasoning effort requested from the selected model. Exact support is model-specific; use dsh_capabilities for live choices.",
+  ),
   session_id: z.string().min(1).optional().describe("Existing DSH session to continue; omit for a fresh session."),
   session_name: z.string().min(1).max(80).optional().describe(
     "Readable persistent DSH session name. Reuses an existing matching session or creates and names a new one. Do not combine with session_id.",

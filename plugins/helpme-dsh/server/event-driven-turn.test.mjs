@@ -128,6 +128,7 @@ test("server has no session-list completion polling", async () => {
   assert.doesNotMatch(source, /execution-scope:/);
   assert.match(source, /max\(3600\)\.default\(1800\)/);
   assert.match(source, /reasoning_effort: z\.enum\(REASONING_EFFORTS\)\.default\("max"\)/);
+  assert.match(source, /const REASONING_EFFORTS = \[[\s\S]*?"minimal"[\s\S]*?"medium"[\s\S]*?"xhigh"[\s\S]*?\];/);
   assert.match(source, /call dsh_run again with session_id set to the returned sessionId[\s\S]*?same DSH subagent fixes it/);
 });
 

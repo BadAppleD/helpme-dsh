@@ -29,6 +29,10 @@ model=deepseek-flash
 reasoning_effort=max
 ```
 
+An explicit `reasoning_effort` may be `off`, `minimal`, `low`, `medium`,
+`high`, `xhigh`, or `max`. Support is model-specific; use `dsh_capabilities`
+to inspect the live model catalog before selecting a non-default value.
+
 ## Requirements
 
 - macOS or Linux
