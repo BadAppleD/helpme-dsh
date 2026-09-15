@@ -105,6 +105,7 @@ node "$PLUGIN_ROOT/scripts/global-agent-rule.mjs"
 mkdir -p "$PLUGIN_COMMAND_DIR"
 ln -sfn "$PLUGIN_ROOT/scripts/update.sh" "$PLUGIN_COMMAND"
 node "$PLUGIN_ROOT/server/host-cli.mjs" start
+node "$PLUGIN_ROOT/scripts/cleanup-legacy-config.mjs"
 
 VERSION=$(node -e '
   const manifest = require(process.argv[1]);

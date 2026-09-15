@@ -47,7 +47,6 @@ if [ -f "$LEGACY_AGENT" ]; then
   esac
 fi
 
-node "$PLUGIN_ROOT/scripts/cleanup-legacy-config.mjs"
 npm --prefix "$PLUGIN_ROOT/server" ci
 node "$PLUGIN_ROOT/server/host-cli.mjs" stop
 codex plugin add helpme-dsh@helpme-dsh-team
@@ -61,6 +60,7 @@ if [ ! -e "$ALLOWED_ROOTS_FILE" ]; then
   printf '%s\n' "$HOME" > "$ALLOWED_ROOTS_FILE"
 fi
 node "$PLUGIN_ROOT/server/host-cli.mjs" start
+node "$PLUGIN_ROOT/scripts/cleanup-legacy-config.mjs"
 
 echo "helpme-dsh installed. Open the shared UI with: helpme-dsh ui"
 echo "Update later by running: helpme-dsh"

@@ -204,12 +204,18 @@ cd plugins/helpme-dsh/server
 npm ci
 node --check server.mjs
 cd ../../..
+node --test plugins/helpme-dsh/scripts/cleanup-legacy-config.test.mjs
 node --test plugins/helpme-dsh/scripts/global-agent-rule.test.mjs
 python3 "$HOME/.codex/skills/.system/plugin-creator/scripts/validate_plugin.py" plugins/helpme-dsh
 ```
 
 After changing an installed local build, run
 `./plugins/helpme-dsh/scripts/update.sh --skip-pull` and start a new Codex task.
+
+After the new plugin and managed Host start successfully, installation and
+updates remove the recognized legacy `[mcp_servers.dsh]` registration that
+launched `.codex/dsh-mcp/server.mjs`. A nonstandard `dsh` MCP registration is
+preserved and reported instead of being overwritten.
 
 ## Compatibility
 
