@@ -16,6 +16,11 @@ REPO_ROOT=$(CDPATH= cd -- "$PLUGIN_ROOT/../.." && pwd)
 PLUGIN_COMMAND_DIR=${HELPME_DSH_BIN_DIR:-"$HOME/.local/bin"}
 PLUGIN_COMMAND="$PLUGIN_COMMAND_DIR/helpme-dsh"
 SKIP_PULL=false
+GIT_COMMAND=git
+
+if [ "$(uname -s)" = "Darwin" ] && [ -x /Library/Developer/CommandLineTools/usr/bin/git ]; then
+  GIT_COMMAND=/Library/Developer/CommandLineTools/usr/bin/git
+fi
 
 usage() {
   cat <<'EOF'
@@ -62,14 +67,19 @@ while [ "$#" -gt 0 ]; do
   shift
 done
 
-for command_name in codex git node npm; do
+for command_name in codex node npm; do
   if ! command -v "$command_name" >/dev/null 2>&1; then
     echo "helpme-dsh: required command is unavailable: $command_name" >&2
     exit 1
   fi
 done
 
-if ! git -C "$REPO_ROOT" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+if ! "$GIT_COMMAND" --version >/dev/null 2>&1; then
+  echo "helpme-dsh: required Git command is unavailable: $GIT_COMMAND" >&2
+  exit 1
+fi
+
+if ! "$GIT_COMMAND" -C "$REPO_ROOT" rev-parse --is-inside-work-tree >/dev/null; then
   echo "helpme-dsh: update must run from a Git clone of the repository" >&2
   exit 1
 fi
@@ -86,13 +96,13 @@ if ! codex plugin list --json | grep -Fq "\"pluginId\": \"$PLUGIN_ID\""; then
 fi
 
 if [ "$SKIP_PULL" = false ]; then
-  if [ -n "$(git -C "$REPO_ROOT" status --porcelain --untracked-files=all)" ]; then
+  if [ -n "$("$GIT_COMMAND" -C "$REPO_ROOT" status --porcelain --untracked-files=all)" ]; then
     echo "helpme-dsh: repository has local changes; commit or preserve them before updating" >&2
     exit 1
   fi
-  PREVIOUS_HEAD=$(git -C "$REPO_ROOT" rev-parse HEAD)
-  git -C "$REPO_ROOT" pull --ff-only
-  UPDATED_HEAD=$(git -C "$REPO_ROOT" rev-parse HEAD)
+  PREVIOUS_HEAD=$("$GIT_COMMAND" -C "$REPO_ROOT" rev-parse HEAD)
+  "$GIT_COMMAND" -C "$REPO_ROOT" pull --ff-only
+  UPDATED_HEAD=$("$GIT_COMMAND" -C "$REPO_ROOT" rev-parse HEAD)
   if [ "$PREVIOUS_HEAD" != "$UPDATED_HEAD" ] && [ "${HELPME_DSH_REEXECUTED:-false}" = false ]; then
     exec env HELPME_DSH_REEXECUTED=true "$PLUGIN_ROOT/scripts/update.sh" --skip-pull
   fi
