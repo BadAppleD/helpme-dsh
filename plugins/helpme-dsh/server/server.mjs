@@ -11,6 +11,7 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import lockfile from "proper-lockfile";
 import WebSocket from "ws";
 import { z } from "zod";
+import { runBatch, validateRunTargets } from "./batch-run.mjs";
 import { EventDrivenTurn } from "./event-driven-turn.mjs";
 import { ensureManagedHost } from "./managed-host.mjs";
 import {
@@ -784,6 +785,32 @@ async function invokeDshRun(args, signal, permission) {
   return invokeDshRunUnlocked(args, signal, permission);
 }
 
+async function invokeDshRunMany({ runs }, signal) {
+  validateRunTargets(runs);
+  const batch = await runBatch(runs, async ({ permission, ...args }) => {
+    const result = await invokeDshRunUnlocked(args, signal, permission);
+    return result.structuredContent;
+  });
+  const value = {
+    ...batch,
+    results: batch.results.map((result) => {
+      const requested = runs[result.index];
+      if (result.ok) return { index: result.index, ok: true, ...result.value };
+      return {
+        index: result.index,
+        ok: false,
+        sessionId: requested.session_id ?? null,
+        sessionName: requested.session_name ?? null,
+        error: result.error,
+      };
+    }),
+  };
+  return {
+    content: [{ type: "text", text: JSON.stringify(value, null, 2) }],
+    structuredContent: value,
+  };
+}
+
 async function invokeSessionList({ cwd, include_blank: includeBlank, limit }, signal) {
   const workspace = cwd === undefined ? undefined : await requireWorkspace(cwd);
   const summaries = await listSessionSummaries(signal);
@@ -856,10 +883,10 @@ const sessionReferenceInputSchema = {
 };
 
 const server = new McpServer(
-  { name: "helpme-dsh", version: "0.5.0" },
+  { name: "helpme-dsh", version: "0.6.0" },
   {
     instructions:
-      "Delegate bounded coding, analysis, debugging, and review tasks to DeepSeek Harness. Treat one HelpMe DSH subagent as exactly one DSH Session: when the user requests multiple DSH subagents, make one independent dsh_run call per subagent and issue independent calls concurrently, using a distinct session_name for each; the shared MCP server and managed Host are infrastructure, not subagents. After calling dsh_run or dsh_run_danger, await that single tool call until it returns: do not poll dsh_sessions or dsh_session_get, and do not use a separate wait or status loop. The run call remains pending and returns once when the DSH Session emits its persisted turn/end event, fails, is cancelled, or reaches its timeout. Treat DSH output as an implementation draft that Codex must validate. When Codex finds an error in a DSH implementation, call dsh_run again with session_id set to the returned sessionId and provide concrete feedback so that the same DSH subagent fixes it; do not create a replacement Session or silently repair it in Codex first. In that correction, prefer removing or replacing the wrong implementation over preserving it with compatibility shims. Codex must validate the correction and, if errors remain, continue the same Session with specific feedback. If that exact Session cannot be continued, report the blocker instead of substituting another subagent. Preserve compatibility only when the user, a public API, a persisted data format, or an external dependency or contract explicitly requires it. Normally call dsh_run directly with cwd set to the active workspace; omitted controls default to standard mode, workspace-write, deepseek-official/deepseek-flash, max reasoning, and a 30-minute timeout. Independent sessions, including write-capable sessions, may run concurrently; give each one a non-overlapping task and never invoke the same session concurrently. Give a new long-lived subagent a session_name; reuse that name or the returned sessionId when the user says continue, and do not create a fresh session in that case. Use dsh_sessions only to resolve ambiguity, dsh_session_get for one summary, and dsh_session_close to archive a finished session without deleting its history. Call dsh_capabilities only for live alternatives. Use dsh_run_danger only for an explicit unrestricted-access request. Never expose DSH credentials, tokens, or cookies.",
+      "Delegate bounded coding, analysis, debugging, and review tasks to DeepSeek Harness. Treat one HelpMe DSH subagent as exactly one DSH Session. When the user requests multiple independent DSH subagents, call dsh_run_many once with one distinct session_name and one non-overlapping task per run. Never wrap multiple dsh_run calls in Promise.all and never create Codex subagents merely to proxy MCP calls; Codex clients may serialize those calls before they reach HelpMe DSH. The shared MCP server and managed Host are infrastructure, not subagents. After calling dsh_run, dsh_run_many, or dsh_run_danger, await that tool call until it returns: do not poll dsh_sessions or dsh_session_get, and do not use a separate wait or status loop. Each run remains pending until its DSH Session emits its persisted turn/end event, fails, is cancelled, or reaches its timeout. Treat DSH output as an implementation draft that Codex must validate. When Codex finds an error in a DSH implementation, call dsh_run again with session_id set to the returned sessionId and provide concrete feedback so that the same DSH subagent fixes it; do not create a replacement Session or silently repair it in Codex first. In that correction, prefer removing or replacing the wrong implementation over preserving it with compatibility shims. Codex must validate the correction and, if errors remain, continue the same Session with specific feedback. If that exact Session cannot be continued, report the blocker instead of substituting another subagent. Preserve compatibility only when the user, a public API, a persisted data format, or an external dependency or contract explicitly requires it. Normally call dsh_run directly with cwd set to the active workspace; omitted controls default to standard mode, workspace-write, deepseek-official/deepseek-flash, max reasoning, and a 30-minute timeout. Independent sessions, including write-capable sessions, may run concurrently inside dsh_run_many; never include the same session twice in one batch. Give a new long-lived subagent a session_name; reuse that name or the returned sessionId when the user says continue, and do not create a fresh session in that case. Use dsh_sessions only to resolve ambiguity, dsh_session_get for one summary, and dsh_session_close to archive a finished session without deleting its history. Call dsh_capabilities only for live alternatives. Use dsh_run_danger only for an explicit unrestricted-access request. Never expose DSH credentials, tokens, or cookies.",
   },
 );
 
@@ -893,7 +920,9 @@ server.registerTool(
         sharedUiOrigin: "http://127.0.0.1:3080",
         managedSingletonHost: true,
         automaticWorkspaceGrouping: true,
-        parallelRunsPerMcpConnection: true,
+        parallelDispatchTool: "dsh_run_many",
+        parallelBatchLimit: 8,
+        directRunCallsMayBeSerializedByClient: true,
         writeCapableRunsParallel: true,
         sameWritableWorkspaceParallel: true,
         dangerFullAccessParallel: true,
@@ -980,6 +1009,28 @@ server.registerTool(
     },
   },
   async ({ permission, ...args }, { signal }) => invokeDshRun(args, signal, permission),
+);
+
+server.registerTool(
+  "dsh_run_many",
+  {
+    title: "Run multiple DeepSeek Harness subagents concurrently",
+    description:
+      "Delegate 2 to 8 independent tasks in one MCP call. HelpMe DSH starts every run concurrently inside the server and waits for all Sessions. Use a distinct session_name and a non-overlapping task for each item. Results preserve input order and report per-item failures without discarding successful sibling results. Do not emulate this with Promise.all over dsh_run calls or with Codex subagents acting as MCP proxies.",
+    inputSchema: {
+      runs: z.array(z.object({
+        ...commonRunInputSchema,
+        permission: z.enum(SAFE_PERMISSION_PRESETS).default("workspace-write").describe("DSH sandbox and approval preset."),
+      })).min(2).max(8),
+    },
+    annotations: {
+      readOnlyHint: false,
+      destructiveHint: true,
+      idempotentHint: false,
+      openWorldHint: true,
+    },
+  },
+  async (args, { signal }) => invokeDshRunMany(args, signal),
 );
 
 server.registerTool(

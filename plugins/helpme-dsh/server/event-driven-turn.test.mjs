@@ -136,6 +136,9 @@ test("different sessions can write concurrently while one session remains locked
   const source = await readFile(new URL("./server.mjs", import.meta.url), "utf8");
   assert.match(source, /async function withSessionLock/);
   assert.match(source, /return invokeDshRunUnlocked\(args, signal, permission\)/);
+  assert.match(source, /"dsh_run_many"/);
+  assert.match(source, /runBatch\(runs/);
+  assert.match(source, /Never wrap multiple dsh_run calls in Promise\.all/);
   assert.doesNotMatch(source, /Another write-capable DSH run is already active/);
 
   const config = JSON.parse(await readFile(new URL("../.mcp.json", import.meta.url), "utf8"));

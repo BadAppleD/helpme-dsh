@@ -5,6 +5,7 @@ Open-source plugin that connects Codex App and Codex CLI to a local DeepSeek Har
 ## What it provides
 
 - `dsh_run` for `read-only` and `workspace-write` sessions
+- `dsh_run_many` for 2–8 independent Sessions started concurrently inside one MCP call
 - `dsh_run_danger` for explicitly approved `danger-full-access` sessions
 - `dsh_sessions`, `dsh_session_get`, and `dsh_session_close` for persistent session management
 - one plugin-managed DSH Host at `127.0.0.1:3080`, shared by Codex and the browser UI
@@ -190,6 +191,11 @@ For example, ask Codex to create three independent Sessions in parallel:
 Run these three read-only DSH subagent tasks in parallel using helpme_dsh,
 with a distinct session_name for each task.
 ```
+
+Codex should satisfy that request with one `dsh_run_many` call. It should not
+wrap several long-running `dsh_run` calls in `Promise.all`, because a client may
+serialize calls before they reach HelpMe DSH. It should not create Codex
+subagents merely to obtain extra MCP connections.
 
 Host lifecycle commands are `helpme-dsh host start`, `status`, `stop`, and
 `restart`. Port `3080` is intentionally exclusive: if another process owns it,
