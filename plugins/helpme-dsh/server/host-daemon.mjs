@@ -57,6 +57,39 @@ function waitForExit(child, timeoutMs) {
   ]);
 }
 
+/**
+ * Proxy variables the Harness must not inherit.
+ *
+ * DSH resolves its outbound proxy policy once, at launch, from the environment it is started with,
+ * and then routes every request through it: provider calls, web search, the plugin market's catalog
+ * and the installers it spawns. This daemon is normally started by Codex, which legitimately exports
+ * a proxy for its own traffic, so handing that same environment straight to `dsh web` welds the
+ * Harness to a proxy that may not be running. DSH is therefore always started direct; Codex keeps
+ * its own proxy environment untouched.
+ */
+const PROXY_ENVIRONMENT_NAMES = [
+  "http_proxy",
+  "https_proxy",
+  "all_proxy",
+  "no_proxy",
+  "HTTP_PROXY",
+  "HTTPS_PROXY",
+  "ALL_PROXY",
+  "NO_PROXY",
+  "NODE_USE_ENV_PROXY",
+  "npm_config_proxy",
+  "npm_config_https_proxy",
+  "npm_config_noproxy",
+  "npm_config_no_proxy",
+];
+
+/** Copy `env` without any proxy variable, so the Harness resolves a direct policy. */
+function withoutProxyEnvironment(env) {
+  const childEnvironment = { ...env };
+  for (const name of PROXY_ENVIRONMENT_NAMES) delete childEnvironment[name];
+  return childEnvironment;
+}
+
 await writeState("starting");
 const child = spawn(DSH_COMMAND, [
   ...DSH_PREFIX,
@@ -68,7 +101,7 @@ const child = spawn(DSH_COMMAND, [
   String(PORT),
 ], {
   cwd: homedir(),
-  env: process.env,
+  env: withoutProxyEnvironment(process.env),
   stdio: ["ignore", "pipe", "pipe"],
 });
 
