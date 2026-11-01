@@ -54,7 +54,7 @@ test("rejects a workspace response for a different path", async () => {
   );
 });
 
-test("creates or adopts a session through workspaceId without passing cwd", async () => {
+test("creates a session through workspaceId without passing cwd", async () => {
   const calls = [];
   const bridge = {
     async rpc(method, payload, signal) {
@@ -66,16 +66,28 @@ test("creates or adopts a session through workspaceId without passing cwd", asyn
   const created = await createWorkspaceSession(bridge, {
     workspaceId: "workspace-train-mac",
     agentPreset: "standard",
-    sessionId: "session-existing",
   });
 
-  assert.equal(created.sessionId, "session-existing");
+  assert.equal(created.sessionId, "session-new");
   assert.deepEqual(calls[0].payload, {
     request: {
       workspaceId: "workspace-train-mac",
       agentPreset: "standard",
-      sessionId: "session-existing",
     },
   });
   assert.equal("cwd" in calls[0].payload.request, false);
+});
+
+test("resumes the exact existing session without creating a new conversation", async () => {
+  const bridge = {
+    async rpc() {
+      assert.fail("session/create must not be called when resuming a session");
+    },
+  };
+  const resumed = await createWorkspaceSession(bridge, {
+    workspaceId: "workspace-train-mac",
+    agentPreset: "standard",
+    sessionId: "session-existing",
+  });
+  assert.equal(resumed.sessionId, "session-existing");
 });

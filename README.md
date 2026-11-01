@@ -25,7 +25,7 @@ Default DSH controls are:
 ```text
 work_mode=standard
 permission=workspace-write
-provider=deepseek-official
+provider=deepseek-account
 model=deepseek-flash
 reasoning_effort=max
 ```

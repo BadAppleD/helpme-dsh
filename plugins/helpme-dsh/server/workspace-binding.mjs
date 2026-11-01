@@ -19,11 +19,12 @@ export async function createWorkspaceSession(
   { workspaceId, agentPreset, sessionId },
   signal,
 ) {
+  // session/create only reuses blank sessions; commands resume existing sessions directly.
+  if (sessionId !== undefined) return { sessionId };
   return bridge.rpc("session/create", {
     request: {
       workspaceId,
       ...(agentPreset === undefined ? {} : { agentPreset }),
-      ...(sessionId === undefined ? {} : { sessionId }),
     },
   }, signal);
 }
