@@ -43,6 +43,10 @@ to inspect the live model catalog before selecting a non-default value.
 
 DSH and all runtime dependencies are pinned in `plugins/helpme-dsh/server/package-lock.json`. The first setup downloads them from npm. Every user authenticates DSH locally; credentials and sessions are never stored in this repository.
 
+Service code and dependencies run from `${XDG_DATA_HOME:-$HOME/.local/share}/helpme-dsh/runtimes/<content-hash>/`.
+The plugin directory stays unchanged during startup, so npm executable symlinks do not break Codex hook fingerprinting.
+Changing service code or the lockfile selects a new runtime; existing DSH credentials and session storage stay in place.
+
 ## Install from a clone
 
 ```bash
@@ -206,12 +210,9 @@ HelpMe DSH reports the conflict and never kills that process automatically.
 ## Development
 
 ```bash
-cd plugins/helpme-dsh/server
-npm ci
-node --check server.mjs
-cd ../../..
-node --test plugins/helpme-dsh/scripts/cleanup-legacy-config.test.mjs
-node --test plugins/helpme-dsh/scripts/global-agent-rule.test.mjs
+runtime_dir=$(node plugins/helpme-dsh/scripts/prepare-runtime.mjs)
+node --check "$runtime_dir/server.mjs"
+node --test "$runtime_dir"/*.test.mjs plugins/helpme-dsh/scripts/*.test.mjs
 python3 "$HOME/.codex/skills/.system/plugin-creator/scripts/validate_plugin.py" plugins/helpme-dsh
 ```
 

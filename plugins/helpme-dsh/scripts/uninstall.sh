@@ -12,7 +12,7 @@ if ! command -v codex >/dev/null 2>&1; then
   exit 1
 fi
 
-node "$PLUGIN_ROOT/server/host-cli.mjs" stop
+"$PLUGIN_ROOT/scripts/launch-runtime" host-cli.mjs stop
 
 if codex plugin list --json | grep -Fq '"pluginId": "helpme-dsh@helpme-dsh-team"'; then
   codex plugin remove helpme-dsh@helpme-dsh-team

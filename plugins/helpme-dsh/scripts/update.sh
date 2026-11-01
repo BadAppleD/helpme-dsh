@@ -37,11 +37,11 @@ EOF
 
 case "${1-}" in
   ui)
-    exec node "$PLUGIN_ROOT/server/host-cli.mjs" ui
+    exec "$PLUGIN_ROOT/scripts/launch-runtime" host-cli.mjs ui
     ;;
   host)
     shift
-    exec node "$PLUGIN_ROOT/server/host-cli.mjs" "${1:-status}"
+    exec "$PLUGIN_ROOT/scripts/launch-runtime" host-cli.mjs "${1:-status}"
     ;;
 esac
 
@@ -108,13 +108,12 @@ if [ "$SKIP_PULL" = false ]; then
   fi
 fi
 
-node "$PLUGIN_ROOT/server/host-cli.mjs" stop
-npm --prefix "$PLUGIN_ROOT/server" ci
+"$PLUGIN_ROOT/scripts/launch-runtime" host-cli.mjs stop
 codex plugin add "$PLUGIN_ID"
 node "$PLUGIN_ROOT/scripts/global-agent-rule.mjs"
 mkdir -p "$PLUGIN_COMMAND_DIR"
 ln -sfn "$PLUGIN_ROOT/scripts/update.sh" "$PLUGIN_COMMAND"
-node "$PLUGIN_ROOT/server/host-cli.mjs" start
+"$PLUGIN_ROOT/scripts/launch-runtime" host-cli.mjs start
 node "$PLUGIN_ROOT/scripts/cleanup-legacy-config.mjs"
 
 VERSION=$(node -e '

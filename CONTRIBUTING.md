@@ -6,15 +6,15 @@ Contributions are welcome through GitHub issues and pull requests.
 
 ```bash
 git clone https://github.com/BadAppleD/helpme-dsh.git
-cd helpme-dsh/plugins/helpme-dsh/server
-npm ci
-node --check server.mjs
+cd helpme-dsh
+runtime_dir=$(node plugins/helpme-dsh/scripts/prepare-runtime.mjs)
+node --check "$runtime_dir/server.mjs"
+node --test "$runtime_dir"/*.test.mjs plugins/helpme-dsh/scripts/*.test.mjs
 ```
 
 Validate the plugin before opening a pull request:
 
 ```bash
-cd ../../..
 python3 "$HOME/.codex/skills/.system/plugin-creator/scripts/validate_plugin.py" plugins/helpme-dsh
 ```
 

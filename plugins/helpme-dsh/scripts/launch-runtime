@@ -1,0 +1,19 @@
+#!/bin/sh
+set -eu
+
+PLUGIN_ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+case "${1-}" in
+  server.mjs|host-cli.mjs) ;;
+  *) echo "helpme-dsh: expected server.mjs or host-cli.mjs" >&2; exit 2 ;;
+esac
+if ! command -v node >/dev/null 2>&1 || [ "$(node -p 'Number(process.versions.node.split(".")[0])')" -lt 20 ]; then
+  echo "helpme-dsh: Node.js 20 or newer is required" >&2
+  exit 1
+fi
+SERVER_DIR=$(node "$PLUGIN_ROOT/scripts/prepare-runtime.mjs")
+if [ "${HELPME_DSH_BOOTSTRAP_ONLY:-0}" = "1" ]; then
+  exit 0
+fi
+ENTRY=$1
+shift
+exec node "$SERVER_DIR/$ENTRY" "$@"
